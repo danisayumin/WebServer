@@ -1,2 +1,2 @@
 # WebServer
-Mom, I made a serving
+Mom, I made a HTTP server
