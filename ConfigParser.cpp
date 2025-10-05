@@ -36,10 +36,8 @@ void ConfigParser::parse() {
 
     std::string line;
     bool inServerBlock = false;
-    int lineNum = 0;
 
     while (std::getline(configFile, line)) {
-        lineNum++;
         std::string trimmedLine = trim(line);
 
         if (trimmedLine.empty() || trimmedLine[0] == '#') {

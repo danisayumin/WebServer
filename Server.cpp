@@ -1,5 +1,6 @@
 #include "Server.hpp"
 #include <stdexcept>
+#include <sstream> // Para std::stringstream
 
 Server::Server(const ConfigParser& config) : _max_fd(0) {
     FD_ZERO(&_master_set);
