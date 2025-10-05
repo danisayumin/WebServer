@@ -1,8 +1,98 @@
-# Webserv
+# Webserv (42 School Project)
 
-Um servidor web HTTP/1.1 simples, não-bloqueante e de thread única, escrito em C++98. Este projeto é uma exploração de conceitos fundamentais de programação de rede, incluindo a API de Sockets e multiplexação de I/O, sem o uso de bibliotecas externas.
+## Visão Geral
 
-## Como Funciona: O Ciclo de Vida de uma Requisição
+Este projeto é a implementação de um servidor web HTTP/1.1 a partir do zero, utilizando C++98. O objetivo é criar um servidor não-bloqueante e de thread única, similar em conceito ao NGINX, capaz de servir conteúdo estático e, futuramente, dinâmico.
+
+O servidor adere a um conjunto estrito de regras, como a proibição de bibliotecas externas e o uso de I/O multiplexada com `select()`.
+
+## Status Atual
+
+O servidor está funcional e é capaz de servir um site estático simples. Ele compila sem erros, inicia corretamente, aceita múltiplas conexões e responde a requisições `GET` básicas, incluindo o tratamento de diferentes tipos de arquivo (HTML, CSS) e erros (404, 405).
+
+## Funcionalidades Implementadas
+
+- [x] **Build System**: Compilação automatizada com `make`.
+- [x] **Parsing de Configuração**: O servidor lê um arquivo de configuração para definir porta, diretório raiz, etc.
+- [x] **Arquitetura Não-Bloqueante**: Loop de eventos principal com `select()` para I/O multiplexada, capaz de lidar com múltiplos clientes sem bloquear.
+- [x] **Gerenciamento de Conexão**: Aceita e gerencia o ciclo de vida de conexões de clientes, incluindo desconexões.
+- [x] **Parsing de Requisição HTTP**: Analisa requisições HTTP para extrair o método e o URI, aguardando a requisição completa (`\r\n\r\n`) antes de processar.
+- [x] **Roteamento de Métodos**: Aceita apenas requisições `GET` e rejeita as demais com `405 Method Not Allowed`.
+- [x] **Servir Arquivos Estáticos**: Encontra e retorna o conteúdo de arquivos solicitados (ex: `index.html`, `style.css`).
+- [x] **Suporte a MIME Types**: Identifica o tipo de arquivo e envia o `Content-Type` correto (ex: `text/html`, `text/css`).
+- [x] **Geração de Respostas de Erro**: Gera respostas para `404 Not Found` e `405 Method Not Allowed`.
+
+## Como Usar e Testar
+
+### 1. Compilação
+
+Para compilar o projeto, use o comando `make` ou `make re` para uma recompilação limpa.
+
+```bash
+make re
+```
+
+### 2. Arquivo de Configuração (`.config`)
+
+O servidor é configurado através de um arquivo. O formato atual é simples e suporta as seguintes diretivas dentro de um bloco `server { ... }`:
+
+- `listen`: A porta em que o servidor vai escutar.
+- `server_name`: O nome do servidor (atualmente não utilizado).
+- `root`: O diretório raiz de onde os arquivos serão servidos.
+- `error_page`: Define uma página customizada para um código de erro (atualmente não utilizado).
+
+**Exemplo de `.config`:**
+```nginx
+server {
+    listen 8080;
+    server_name webserv.com;
+
+    root ./www;
+    index index.html;
+
+    error_page 404 /404.html;
+
+    location / {
+        try_files $uri $uri/ =404;
+    }
+
+    location /upload {
+        client_max_body_size 10M;
+    }
+}
+```
+
+### 3. Execução
+
+Inicie o servidor passando o arquivo de configuração como argumento.
+
+```bash
+./webserv .config
+```
+
+O servidor ficará em execução, aguardando por conexões.
+
+### 4. Testando
+
+**a) Com o Navegador:**
+
+Abra seu navegador e acesse `http://localhost:8080`. Você deverá ver a página de boas-vindas com o estilo CSS aplicado.
+
+**b) Com `curl` (GET bem-sucedido):**
+
+Abra um novo terminal e peça a página inicial. Você receberá o conteúdo do `index.html`.
+```bash
+curl http://localhost:8080
+```
+
+**c) Com `curl` (Método não permitido):**
+
+Envie uma requisição `POST`. O servidor deve responder com `405 Method Not Allowed`. O `-v` mostra os detalhes da resposta.
+```bash
+curl -X POST -v http://localhost:8080
+```
+
+## Arquitetura e Ciclo de Vida da Requisição
 
 Esta seção detalha a jornada completa de uma requisição HTTP, desde o navegador até a resposta do servidor.
 
@@ -51,69 +141,10 @@ Esta seção detalha a jornada completa de uma requisição HTTP, desde o navega
 - O objeto `ClientConnection` é destruído, liberando a memória.
 - O servidor volta ao seu loop com `select()`, pronto para a próxima conexão.
 
-## Status Atual
-
-
-O servidor compila e executa com sucesso. A arquitetura principal baseada em eventos está funcional. Ele é capaz de:
-- Aceitar múltiplas conexões TCP simultaneamente.
-- Ler dados brutos enviados pelos clientes.
-- Detectar e gerenciar corretamente a desconexão de um cliente, liberando seus recursos.
-
-O núcleo do servidor é um loop de eventos que utiliza `select()` para monitorar múltiplos sockets de forma não-bloqueante.
-
-## Funcionalidades Implementadas
-
-- [x] **Build System**: Compilação automatizada com `make` a partir de um `Makefile`.
-- [x] **Arquitetura Não-Bloqueante**: Loop de eventos principal com `select()` para I/O multiplexada.
-- [x] **Gerenciamento de Sockets**: Criação, configuração (`SO_REUSEADDR`, `O_NONBLOCK`), `bind()` e `listen()` de sockets de escuta.
-- [x] **Gerenciamento de Conexões**: Aceita novas conexões e cria objetos `ClientConnection` para gerenciá-las.
-- [x] **Ciclo de Vida do Cliente**: Gerencia a criação e destruição de conexões de clientes, incluindo a liberação de memória e o fechamento de file descriptors.
-- [x] **Leitura de Dados**: Lê dados brutos das conexões ativas quando `select()` indica que estão prontas.
-- [x] **Detecção de Desconexão**: Identifica quando um cliente fecha a conexão e remove-o do conjunto de monitoramento.
-
-## Como Compilar e Executar
-
-### 1. Compilação
-
-Para compilar o projeto, basta executar o comando `make` na raiz do diretório:
-
-```bash
-make
-```
-
-Isso gerará um executável chamado `webserv`.
-
-### 2. Execução
-
-O servidor requer um arquivo de configuração como argumento de linha de comando (embora a lógica de parsing ainda não esteja implementada).
-
-```bash
-./webserv <caminho_para_arquivo_config>
-```
-
-### 3. Teste Rápido
-
-Você pode testar a funcionalidade básica de conexão com `netcat` ou `telnet`.
-
-**Terminal 1 (Servidor):**
-```bash
-# O arquivo de configuração pode ser qualquer coisa por enquanto
-./webserv dummy.conf
-# Saída esperada: Server listening on port 8080
-#              Server ready. Waiting for connections...
-```
-
-**Terminal 2 (Cliente):**
-```bash
-nc localhost 8080
-```
-
-Ao conectar, o terminal do servidor mostrará uma mensagem de nova conexão. Se você digitar algo no terminal do cliente e pressionar Enter, o servidor reportará os bytes lidos. Fechar o cliente (`Ctrl+C` no `nc`) fará com que o servidor reporte a desconexão.
-
 ## Próximos Passos
 
-- [ ] **Parsing de Requisição HTTP**: Implementar a lógica para analisar a requisição HTTP recebida (método, URI, headers, corpo).
-- [ ] **Geração de Resposta HTTP**: Construir respostas HTTP válidas (status line, headers, corpo).
-- [ ] **Parsing de Configuração**: Ler e aplicar as configurações do arquivo de configuração (portas, rotas, etc.).
-- [ ] **Servir Arquivos Estáticos**: Implementar a lógica para encontrar e retornar o conteúdo de arquivos solicitados.
-- [ ] **Gerenciamento de Escrita**: Integrar o conjunto de FDs de escrita no `select()` para enviar respostas grandes de forma não-bloqueante.
+- [ ] **Roteamento Avançado**: Implementar o parsing e a lógica dos blocos `location`.
+- [ ] **Conteúdo Dinâmico (CGI)**: Adicionar a capacidade de executar scripts para gerar respostas.
+- [ ] **Suporte a POST**: Implementar o tratamento do corpo de requisições, necessário para uploads de arquivos e formulários.
+- [ ] **Gerenciamento de Escrita Não-Bloqueante**: Usar o `select()` também para escritas (`write_fds`) para lidar com o envio de arquivos grandes sem bloquear o servidor.
+- [ ] **Melhorar Parsing de Configuração**: Tornar o parser mais robusto e capaz de lidar com múltiplas seções `server`.
