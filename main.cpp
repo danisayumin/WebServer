@@ -1,27 +1,26 @@
 #include "Server.hpp"
+#include "ConfigParser.hpp"
 #include <iostream>
 #include <exception>
 
 int main(int argc, char **argv) {
-    // 2. Verifica se recebeu exatamente um argumento (arquivo de configuração)
     if (argc != 2) {
         std::cerr << "Usage: ./webserv <configuration_file>" << std::endl;
         return 1;
     }
 
     try {
-        // 3. Cria um objeto da classe 'Server'
-        Server server;
+        // 1. Cria o objeto de configuração a partir do arquivo.
+        ConfigParser config(argv[1]);
 
-        // 4. Chama um método 'init' no servidor
-        server.init(argv[1]);
+        // 2. Cria o servidor, passando o objeto de configuração.
+        Server server(config);
 
-        // 5. Chama um método 'run' para iniciar o loop principal
+        // 3. Inicia o loop principal do servidor.
         server.run();
 
     } catch (const std::exception& e) {
-        // 6. Captura exceções e mostra a mensagem de erro
-        std::cerr << "Error: " << e.what() << std::endl;
+        std::cerr << "Critical Error: " << e.what() << std::endl;
         return 1;
     }
 

@@ -2,6 +2,43 @@
 
 Um servidor web HTTP/1.1 simples, não-bloqueante e de thread única, escrito em C++98. Este projeto é uma exploração de conceitos fundamentais de programação de rede, incluindo a API de Sockets e multiplexação de I/O, sem o uso de bibliotecas externas.
 
+## Arquitetura do Servidor
+
+O `webserv` é projetado com uma arquitetura modular e orientada a objetos para garantir clareza, manutenibilidade e robustez. Os principais componentes são:
+
+*   **`ConfigParser`**:
+    *   Responsável por ler e validar o arquivo de configuração.
+    *   Fornece as diretivas (porta, root, etc.) para o restante do servidor.
+
+*   **`Server`**:
+    *   É a classe central que orquestra todo o servidor.
+    *   Inicializa o socket de escuta principal.
+    *   Executa o loop de eventos principal usando `select()` para gerenciar múltiplas conexões de forma não-bloqueante.
+    *   Aceita novas conexões e cria instâncias de `ClientConnection` para cada uma.
+
+*   **`ClientConnection`**:
+    *   Representa um cliente único conectado ao servidor.
+    *   Gerencia o ciclo de vida da conexão, desde a leitura da requisição até o envio da resposta.
+    *   Contém os objetos de requisição e resposta.
+
+*   **`HTTPRequest`** (a ser implementado):
+    *   Recebe os dados brutos do socket do cliente e os interpreta, transformando-os em uma estrutura de requisição HTTP compreensível.
+    *   Armazena o método, URI, headers e o corpo da requisição.
+
+*   **`HTTPResponse`** (a ser implementado):
+    *   Constrói a resposta HTTP que será enviada de volta ao cliente.
+    *   Define o status code, headers (como `Content-Type`) e o corpo da resposta, que pode ser o conteúdo de um arquivo estático ou uma página de erro.
+
+### Fluxo de uma Requisição
+
+1.  O `Server` aguarda por atividade nos sockets usando `select()`.
+2.  Uma nova conexão chega -> `Server` usa `accept()` e cria um novo `ClientConnection`.
+3.  Dados são recebidos no socket do cliente -> `ClientConnection` lê os dados.
+4.  Os dados são passados para o `HTTPRequest` para parsing.
+5.  Com base na requisição, o `HTTPResponse` é montado (ex: lendo um arquivo do `root`).
+6.  O `ClientConnection` envia a resposta finalizada de volta ao cliente.
+7.  A conexão é fechada.
+
 ## Status Atual
 
 O servidor compila e executa com sucesso. A arquitetura principal baseada em eventos está funcional. Ele é capaz de:
