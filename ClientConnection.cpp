@@ -1,34 +1,41 @@
 #include "ClientConnection.hpp"
+#include <unistd.h> // Para read
 #include <iostream>
 
-#define BUFFER_SIZE 2048
-
-ClientConnection::ClientConnection(int client_fd) : _fd(client_fd) {
-    // Aloca um buffer de tamanho fixo para a leitura inicial
-    _read_buffer.resize(BUFFER_SIZE);
-    std::cout << "New client connection created for fd: " << _fd << std::endl;
+ClientConnection::ClientConnection(int client_fd) : _client_fd(client_fd), _is_request_complete(false) {
+    // Construtor
 }
 
 ClientConnection::~ClientConnection() {
-    std::cout << "Client connection destroyed for fd: " << _fd << std::endl;
-}
-
-ssize_t ClientConnection::readRequest() {
-    // Tenta ler dados do socket para o buffer
-    // A função 'read' é uma chamada de sistema direta
-    return read(_fd, &_read_buffer[0], _read_buffer.size());
+    // Destrutor
 }
 
 int ClientConnection::getFd() const {
-    return _fd;
+    return _client_fd;
 }
 
-// Implementações vazias para o construtor de cópia e operador de atribuição
-ClientConnection::ClientConnection(const ClientConnection& other) {
-    (void)other;
+// Lê dados do socket e anexa ao buffer interno
+ssize_t ClientConnection::readRequest() {
+    char buffer[1024];
+    ssize_t bytes_read = read(_client_fd, buffer, sizeof(buffer) - 1);
+
+    if (bytes_read > 0) {
+        buffer[bytes_read] = '\0';
+        _requestBuffer.append(buffer);
+        // Verifica se a requisição está completa
+        if (_requestBuffer.find("\r\n\r\n") != std::string::npos) {
+            _is_request_complete = true;
+        }
+    }
+    return bytes_read;
 }
 
-ClientConnection& ClientConnection::operator=(const ClientConnection& other) {
-    (void)other;
-    return *this;
+// Retorna o buffer com os dados da requisição
+const std::string& ClientConnection::getRequestBuffer() const {
+    return _requestBuffer;
 }
+
+bool ClientConnection::isRequestComplete() const {
+    return _is_request_complete;
+}
+

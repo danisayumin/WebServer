@@ -2,44 +2,57 @@
 
 Um servidor web HTTP/1.1 simples, não-bloqueante e de thread única, escrito em C++98. Este projeto é uma exploração de conceitos fundamentais de programação de rede, incluindo a API de Sockets e multiplexação de I/O, sem o uso de bibliotecas externas.
 
-## Arquitetura do Servidor
+## Como Funciona: O Ciclo de Vida de uma Requisição
 
-O `webserv` é projetado com uma arquitetura modular e orientada a objetos para garantir clareza, manutenibilidade e robustez. Os principais componentes são:
+Esta seção detalha a jornada completa de uma requisição HTTP, desde o navegador até a resposta do servidor.
 
-*   **`ConfigParser`**:
-    *   Responsável por ler e validar o arquivo de configuração.
-    *   Fornece as diretivas (porta, root, etc.) para o restante do servidor.
+### 1. Inicialização do Servidor
 
-*   **`Server`**:
-    *   É a classe central que orquestra todo o servidor.
-    *   Inicializa o socket de escuta principal.
-    *   Executa o loop de eventos principal usando `select()` para gerenciar múltiplas conexões de forma não-bloqueante.
-    *   Aceita novas conexões e cria instâncias de `ClientConnection` para cada uma.
+- Você executa `./webserv .config` no terminal.
+- O `main` cria uma instância do `ConfigParser`, que lê e valida o `.config`.
+- Em seguida, o `main` cria uma instância do `Server`, passando as configurações lidas.
+- O construtor do `Server` chama `socket()`, `bind()` e `listen()`. Isso instrui o Sistema Operacional (SO) a começar a escutar por conexões na porta especificada (ex: 8080).
+- **Ponto Chave**: Se o servidor não estiver rodando, o SO recusará ativamente qualquer tentativa de conexão a essa porta, resultando no erro `Connection refused`.
 
-*   **`ClientConnection`**:
-    *   Representa um cliente único conectado ao servidor.
-    *   Gerencia o ciclo de vida da conexão, desde a leitura da requisição até o envio da resposta.
-    *   Contém os objetos de requisição e resposta.
+### 2. A Chegada da Conexão
 
-*   **`HTTPRequest`** (a ser implementado):
-    *   Recebe os dados brutos do socket do cliente e os interpreta, transformando-os em uma estrutura de requisição HTTP compreensível.
-    *   Armazena o método, URI, headers e o corpo da requisição.
+- Um cliente (navegador ou `curl`) tenta se conectar a `localhost:8080`.
+- O SO, que estava escutando, vê essa tentativa e notifica o processo `webserv`.
+- Dentro do `Server::run()`, a chamada `select()` desbloqueia e reporta que o socket principal de escuta tem atividade.
+- O método `_acceptNewConnection` é chamado. Ele usa `accept()` para criar um **novo socket** dedicado exclusivamente a este cliente.
+- Uma instância de `ClientConnection` é criada para gerenciar este novo socket e o estado do cliente.
 
-*   **`HTTPResponse`** (a ser implementado):
-    *   Constrói a resposta HTTP que será enviada de volta ao cliente.
-    *   Define o status code, headers (como `Content-Type`) e o corpo da resposta, que pode ser o conteúdo de um arquivo estático ou uma página de erro.
+### 3. Recebendo e Validando a Requisição
 
-### Fluxo de uma Requisição
+- O cliente envia a requisição HTTP como texto (ex: `GET /style.css HTTP/1.1...`).
+- O `select()` novamente desperta, desta vez reportando atividade no socket do cliente.
+- `_handleClientData` é chamado. O método `client->readRequest()` lê os dados do socket e os acumula em um buffer interno.
+- O `readRequest` verifica continuamente se o buffer contém o marcador de fim de cabeçalhos (`\r\n\r\n`). Enquanto não o encontra, o servidor simplesmente aguarda por mais dados.
+- Quando a requisição está completa, uma instância de `HttpRequest` é criada para interpretar o buffer.
+- A primeira verificação é feita: `if (req.getMethod() != "GET")`. Se o método não for `GET`, uma resposta `405 Method Not Allowed` é preparada e o processo pula para o passo 5.
 
-1.  O `Server` aguarda por atividade nos sockets usando `select()`.
-2.  Uma nova conexão chega -> `Server` usa `accept()` e cria um novo `ClientConnection`.
-3.  Dados são recebidos no socket do cliente -> `ClientConnection` lê os dados.
-4.  Os dados são passados para o `HTTPRequest` para parsing.
-5.  Com base na requisição, o `HTTPResponse` é montado (ex: lendo um arquivo do `root`).
-6.  O `ClientConnection` envia a resposta finalizada de volta ao cliente.
-7.  A conexão é fechada.
+### 4. Montando a Resposta (Lógica GET)
+
+- O servidor determina o caminho do arquivo solicitado. Ele combina a diretiva `root` do `.config` (ex: `./www`) com o URI da requisição (ex: `/style.css`) para formar o caminho completo: `./www/style.css`.
+- O servidor tenta abrir o arquivo. 
+- **Caso de Sucesso**: Se o arquivo for encontrado, uma instância de `HttpResponse` é preenchida com:
+    - Status: `200 OK`.
+    - Headers: `Content-Type` (determinado pela função `getMimeType`) e `Content-Length` (o tamanho do arquivo).
+    - Corpo: O conteúdo do arquivo lido.
+- **Caso de Falha**: Se o arquivo não for encontrado, a `HttpResponse` é preenchida com:
+    - Status: `404 Not Found`.
+    - Corpo: Um HTML simples de erro.
+
+### 5. Envio e Finalização
+
+- O método `res.toString()` é chamado para montar a string de texto completa da resposta HTTP (status, headers e corpo).
+- `send()` envia essa string de volta para o cliente através do socket da conexão.
+- `close()` é chamado no socket do cliente, encerrando a conexão.
+- O objeto `ClientConnection` é destruído, liberando a memória.
+- O servidor volta ao seu loop com `select()`, pronto para a próxima conexão.
 
 ## Status Atual
+
 
 O servidor compila e executa com sucesso. A arquitetura principal baseada em eventos está funcional. Ele é capaz de:
 - Aceitar múltiplas conexões TCP simultaneamente.

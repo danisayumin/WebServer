@@ -24,7 +24,7 @@ public:
     void run();
 
 private:
-    void _setupServerSocket(int port);
+    int _setupServerSocket(int port);
     void _acceptNewConnection(int listening_fd);
     void _handleClientData(int client_fd);
 

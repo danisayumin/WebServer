@@ -64,8 +64,14 @@ void ConfigParser::parse() {
             ss >> _port;
         } else if (directive == "server_name") {
             ss >> _serverName;
+            if (!_serverName.empty() && _serverName[_serverName.length() - 1] == ';') {
+                _serverName.erase(_serverName.length() - 1);
+            }
         } else if (directive == "root") {
             ss >> _root;
+            if (!_root.empty() && _root[_root.length() - 1] == ';') {
+                _root.erase(_root.length() - 1);
+            }
         } else if (directive == "error_page") {
             int code;
             std::string page;
