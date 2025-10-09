@@ -71,6 +71,14 @@ void ConfigParser::parse() {
         if (current_location) {
             if (directive == "root") current_location->root = value;
             else if (directive == "index") current_location->index = value;
+            else if (directive == "cgi_pass") {
+                current_location->cgi_pass.push_back(value); // Adiciona o interpretador
+                std::string script_path;
+                if (ss >> script_path && !script_path.empty() && script_path[script_path.length() - 1] == ';') {
+                    script_path.erase(script_path.length() - 1);
+                }
+                current_location->cgi_pass.push_back(script_path); // Adiciona o script
+            }
         } else {
             if (directive == "listen") _port = std::atoi(value.c_str());
             else if (directive == "root") _root = value;

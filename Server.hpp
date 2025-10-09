@@ -15,6 +15,7 @@ public:
 private:
     void _acceptNewConnection();
     void _handleClientData(int client_fd);
+    void _executeCgi(ClientConnection* client, const LocationConfig* loc);
     void _setupServerSocket();
 
     const ConfigParser& _config;
