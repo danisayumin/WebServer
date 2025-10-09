@@ -1,18 +1,8 @@
 #ifndef SERVER_HPP
 #define SERVER_HPP
 
-#include <iostream>
-#include <string>
-#include <vector>
 #include <map>
-#include <exception>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <sys/select.h>
-#include <unistd.h>
-#include <fcntl.h>
-#include <cstring>
-
+#include <string>
 #include "ConfigParser.hpp"
 #include "ClientConnection.hpp"
 
@@ -20,22 +10,19 @@ class Server {
 public:
     explicit Server(const ConfigParser& config);
     ~Server();
-
     void run();
 
 private:
-    int _setupServerSocket(int port);
-    void _acceptNewConnection(int listening_fd);
+    void _acceptNewConnection();
     void _handleClientData(int client_fd);
+    void _setupServerSocket();
 
-    std::map<int, ConfigParser> _listening_sockets;
-    std::map<int, ClientConnection*> _clients;
-
+    const ConfigParser& _config;
+    int _listen_fd;
+    int _max_fd;
     fd_set _master_set;
     fd_set _read_fds;
-    fd_set _write_fds;
-
-    int _max_fd;
+    std::map<int, ClientConnection*> _clients;
 };
 
-#endif // SERVER_HPP
+#endif
