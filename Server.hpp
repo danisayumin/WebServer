@@ -1,6 +1,7 @@
 #ifndef SERVER_HPP
 #define SERVER_HPP
 
+#include <sys/select.h>
 #include <map>
 #include <string>
 #include "ConfigParser.hpp"
