@@ -194,12 +194,18 @@ void Server::_handleClientData(int client_fd) {
 void Server::_executeCgi(ClientConnection* client, const LocationConfig* loc) {
     int cgi_pipe[2];
     if (pipe(cgi_pipe) < 0) {
-        std::cerr << "CGI Error: pipe() failed" << std::endl; return;
+        std::cerr << "CGI Error: pipe() failed" << std::endl;
+        _sendErrorResponse(client, 500, "Internal Server Error: pipe() failed");
+        return;
     }
 
     pid_t pid = fork();
     if (pid < 0) {
-        std::cerr << "CGI Error: fork() failed" << std::endl; close(cgi_pipe[0]); close(cgi_pipe[1]); return;
+        std::cerr << "CGI Error: fork() failed" << std::endl;
+        close(cgi_pipe[0]);
+        close(cgi_pipe[1]);
+        _sendErrorResponse(client, 500, "Internal Server Error: fork() failed");
+        return;
     }
 
     if (pid == 0) { // Child Process
@@ -273,7 +279,11 @@ void Server::_executeCgi(ClientConnection* client, const LocationConfig* loc) {
 
         // Set the pipe's read end to non-blocking
         if (fcntl(cgi_pipe[0], F_SETFL, O_NONBLOCK) < 0) {
-            std::cerr << "CGI Error: fcntl() failed" << std::endl; kill(pid, SIGKILL); close(cgi_pipe[0]); return;
+            std::cerr << "CGI Error: fcntl() failed" << std::endl;
+            kill(pid, SIGKILL); // Kill the child process
+            close(cgi_pipe[0]);
+            _sendErrorResponse(client, 500, "Internal Server Error: fcntl() failed");
+            return;
         }
 
         // Associate the pipe and pid with the client connection
@@ -319,50 +329,53 @@ void Server::_handleCgiRead(int pipe_fd) {
         std::string current_response = client->getResponseBuffer();
         current_response.append(buffer);
         client->setResponse(current_response);
+        std::cerr << "_handleCgiRead: Read " << bytes_read << " bytes. Current output: " << current_response << std::endl;
     } else { // read <= 0 means EOF or error
+        std::cerr << "_handleCgiRead: EOF or error. bytes_read = " << bytes_read << std::endl;
         // CGI script has finished or error occurred
         std::string cgi_output = client->getResponseBuffer();
+        std::cerr << "_handleCgiRead: Full CGI output: \n---\n" << cgi_output << "\n---\n" << std::endl;
         
+        // --- NEW ERROR DETECTION LOGIC FOR CHILD PROCESS ERRORS ---
+        if (cgi_output.find("execve failed") != std::string::npos ||
+            cgi_output.find("No such file or directory") != std::string::npos ||
+            cgi_output.find("Permission denied") != std::string::npos ||
+            cgi_output.empty()) // If child produced no output, it might be an error
+        {
+            std::cerr << "_handleCgiRead: Detected child process error in CGI output. Sending 500." << std::endl;
+            _sendErrorResponse(client, 500, "Internal Server Error: CGI script execution failed");
+            // Cleanup CGI process
+            waitpid(client->getCgiPid(), NULL, 0); // Wait for child process to finish
+            close(pipe_fd);
+            FD_CLR(pipe_fd, &_master_set);
+            _pipe_to_client_map.erase(pipe_fd);
+            client->setCgiPid(0);
+            client->setCgiPipeFd(-1);
+            return; // Important: return after sending error
+        }
+        // --- END NEW ERROR DETECTION LOGIC ---
+
         HttpResponse res;
         res.setStatusCode(200, "OK"); // Default status for successful CGI
 
         size_t header_end = cgi_output.find("\r\n\r\n");
+        size_t separator_len = 4;
         if (header_end == std::string::npos) {
-            // No headers, just body or malformed CGI output
-            res.setBody(cgi_output);
-        } else {
-            std::string cgi_headers_str = cgi_output.substr(0, header_end);
-            std::string cgi_body = cgi_output.substr(header_end + 4); // +4 for \r\n\r\n
-            std::stringstream ss_headers(cgi_headers_str);
-            std::string line;
-            while (std::getline(ss_headers, line, '\r')) { // Read line by line, split by \r
-                if (line.empty()) continue;
-                if (line[0] == '\n') line = line.substr(1); // Remove leading \n if present
-                size_t colon_pos = line.find(":");
-                if (colon_pos != std::string::npos) {
-                    std::string key = line.substr(0, colon_pos);
-                    std::string value = line.substr(colon_pos + 1);
-                    // Trim whitespace from value
-                    size_t first_char = value.find_first_not_of(" \t");
-                    if (first_char != std::string::npos) {
-                        value = value.substr(first_char);
-                    }
-                    res.addHeader(key, value);
-                }
-            }
-            res.setBody(cgi_body);
+            header_end = cgi_output.find("\n\n");
+            separator_len = 2;
         }
 
-        // Add Content-Length header
-        std::stringstream ss_len;
         std::string final_body;
 
         if (header_end == std::string::npos) {
+            std::cerr << "_handleCgiRead: No CGI headers found." << std::endl;
             final_body = cgi_output;
         } else {
             std::string cgi_headers_str = cgi_output.substr(0, header_end);
-            std::string cgi_body = cgi_output.substr(header_end + 4); // +4 for \r\n\r\n
+            std::string cgi_body = cgi_output.substr(header_end + separator_len);
             final_body = cgi_body;
+            std::cerr << "_handleCgiRead: CGI Headers: \n" << cgi_headers_str << std::endl;
+            std::cerr << "_handleCgiRead: CGI Body: \n" << cgi_body << std::endl;
 
             std::stringstream ss_headers(cgi_headers_str);
             std::string line;
@@ -379,12 +392,15 @@ void Server::_handleCgiRead(int pipe_fd) {
                         value = value.substr(first_char);
                     }
                     res.addHeader(key, value);
+                    std::cerr << "_handleCgiRead: Added Header: " << key << ": " << value << std::endl;
                 }
             }
         }
         res.setBody(final_body);
+        std::stringstream ss_len;
         ss_len << final_body.length();
         res.addHeader("Content-Length", ss_len.str());
+        std::cerr << "_handleCgiRead: Final Body Length: " << final_body.length() << std::endl;
 
         client->setResponse(res.toString());
         FD_SET(client_fd, &_write_fds);
@@ -423,4 +439,22 @@ void Server::_handleClientWrite(int client_fd) {
         FD_CLR(client_fd, &_write_fds);
         close(client_fd); FD_CLR(client_fd, &_master_set); delete _clients[client_fd]; _clients.erase(client_fd);
     }
+}
+
+void Server::_sendErrorResponse(ClientConnection* client, int code, const std::string& message) {
+    HttpResponse res;
+    res.setStatusCode(code, message);
+    res.addHeader("Content-Type", "text/html");
+
+    std::stringstream body_ss;
+    body_ss << "<html><body><h1>" << code << " " << message << "</h1></body></html>";
+    const std::string body = body_ss.str();
+
+    std::stringstream len_ss;
+    len_ss << body.length();
+    res.addHeader("Content-Length", len_ss.str());
+    res.setBody(body);
+
+    client->setResponse(res.toString());
+    FD_SET(client->getFd(), &_write_fds);
 }

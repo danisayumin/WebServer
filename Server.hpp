@@ -19,6 +19,7 @@ private:
     void _handleClientWrite(int client_fd);
     void _handleCgiRead(int pipe_fd);
     void _executeCgi(ClientConnection* client, const LocationConfig* loc);
+    void _sendErrorResponse(ClientConnection* client, int code, const std::string& message);
     int _setupServerSocket(int port);
 
     const ConfigParser& _config;
