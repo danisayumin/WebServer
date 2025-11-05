@@ -90,7 +90,11 @@ void Server::run() {
                 }
             }
             if (FD_ISSET(fd, &write_fds)) {
-                _handleClientWrite(fd);
+                if (_cgi_stdin_pipe_to_client_map.count(fd)) {
+                    _handleCgiWrite(fd);
+                } else {
+                    _handleClientWrite(fd);
+                }
             }
         }
     }
@@ -149,7 +153,9 @@ void Server::_handleClientData(int client_fd) {
                 return;
             }
             
-            if (req.getMethod() != "GET") {
+            if (req.getMethod() == "POST") { // Handle POST for non-CGI
+                res.setStatusCode(405, "Method Not Allowed");
+            } else if (req.getMethod() != "GET") {
                 res.setStatusCode(405, "Method Not Allowed");
             } else {
                 std::string root = _config.getRoot();
@@ -192,8 +198,10 @@ void Server::_handleClientData(int client_fd) {
 }
 
 void Server::_executeCgi(ClientConnection* client, const LocationConfig* loc) {
-    int cgi_pipe[2];
-    if (pipe(cgi_pipe) < 0) {
+    int cgi_stdout_pipe[2]; // Pipe for CGI to write its stdout to
+    int cgi_stdin_pipe[2];  // Pipe for server to write request body to CGI's stdin
+
+    if (pipe(cgi_stdout_pipe) < 0 || pipe(cgi_stdin_pipe) < 0) {
         std::cerr << "CGI Error: pipe() failed" << std::endl;
         _sendErrorResponse(client, 500, "Internal Server Error: pipe() failed");
         return;
@@ -202,25 +210,29 @@ void Server::_executeCgi(ClientConnection* client, const LocationConfig* loc) {
     pid_t pid = fork();
     if (pid < 0) {
         std::cerr << "CGI Error: fork() failed" << std::endl;
-        close(cgi_pipe[0]);
-        close(cgi_pipe[1]);
+        close(cgi_stdout_pipe[0]); close(cgi_stdout_pipe[1]);
+        close(cgi_stdin_pipe[0]); close(cgi_stdin_pipe[1]);
         _sendErrorResponse(client, 500, "Internal Server Error: fork() failed");
         return;
     }
 
     if (pid == 0) { // Child Process
-        close(cgi_pipe[0]); // Close read end
+        close(cgi_stdout_pipe[0]); // Child doesn't read from stdout pipe
+        close(cgi_stdin_pipe[1]);  // Child doesn't write to stdin pipe
 
-        // Redirect stdout and stderr to pipe
-        if (dup2(cgi_pipe[1], STDOUT_FILENO) == -1) {
-            perror("dup2 STDOUT_FILENO failed");
-            exit(EXIT_FAILURE);
+        // Redirect child's stdin to be the read end of the stdin pipe
+        if (dup2(cgi_stdin_pipe[0], STDIN_FILENO) == -1) {
+            perror("dup2 STDIN_FILENO failed"); exit(EXIT_FAILURE);
         }
-        if (dup2(cgi_pipe[1], STDERR_FILENO) == -1) { // Redirect stderr as well
-            perror("dup2 STDERR_FILENO failed");
-            exit(EXIT_FAILURE);
+        // Redirect child's stdout and stderr to be the write end of the stdout pipe
+        if (dup2(cgi_stdout_pipe[1], STDOUT_FILENO) == -1) {
+            perror("dup2 STDOUT_FILENO failed"); exit(EXIT_FAILURE);
         }
-        close(cgi_pipe[1]); // Close original write end
+        if (dup2(cgi_stdout_pipe[1], STDERR_FILENO) == -1) {
+            perror("dup2 STDERR_FILENO failed"); exit(EXIT_FAILURE);
+        }
+        close(cgi_stdout_pipe[1]);
+        close(cgi_stdin_pipe[0]);
 
         HttpRequest req(client->getRequestBuffer());
 
@@ -237,8 +249,7 @@ void Server::_executeCgi(ClientConnection* client, const LocationConfig* loc) {
 
         char cwd[1024];
         if (getcwd(cwd, sizeof(cwd)) == NULL) {
-            perror("getcwd failed");
-            exit(EXIT_FAILURE);
+            perror("getcwd failed"); exit(EXIT_FAILURE);
         }
         std::string script_filename = std::string(cwd) + script_name_uri;
 
@@ -257,6 +268,10 @@ void Server::_executeCgi(ClientConnection* client, const LocationConfig* loc) {
         env_vars_str.push_back("SERVER_PROTOCOL=HTTP/1.1");
         env_vars_str.push_back("SERVER_SOFTWARE=webserv/1.0");
         env_vars_str.push_back("GATEWAY_INTERFACE=CGI/1.1");
+        if (req.getMethod() == "POST") {
+            env_vars_str.push_back("CONTENT_LENGTH=" + req.getHeader("Content-Length"));
+            env_vars_str.push_back("CONTENT_TYPE=" + req.getHeader("Content-Type"));
+        }
 
         char** envp_c = new char*[env_vars_str.size() + 1];
         for (size_t i = 0; i < env_vars_str.size(); ++i) {
@@ -275,26 +290,39 @@ void Server::_executeCgi(ClientConnection* client, const LocationConfig* loc) {
         exit(EXIT_FAILURE);
 
     } else { // Parent Process
-        close(cgi_pipe[1]); // Parent doesn't write to the pipe
+        close(cgi_stdout_pipe[1]); // Parent doesn't write to CGI's stdout
+        close(cgi_stdin_pipe[0]);  // Parent doesn't read from CGI's stdin
 
-        // Set the pipe's read end to non-blocking
-        if (fcntl(cgi_pipe[0], F_SETFL, O_NONBLOCK) < 0) {
-            std::cerr << "CGI Error: fcntl() failed" << std::endl;
-            kill(pid, SIGKILL); // Kill the child process
-            close(cgi_pipe[0]);
+        // Set the CGI's stdout READ end to non-blocking
+        if (fcntl(cgi_stdout_pipe[0], F_SETFL, O_NONBLOCK) < 0) {
+            std::cerr << "CGI Error: fcntl() on stdout pipe failed" << std::endl;
+            kill(pid, SIGKILL); close(cgi_stdout_pipe[0]); close(cgi_stdin_pipe[1]);
             _sendErrorResponse(client, 500, "Internal Server Error: fcntl() failed");
             return;
         }
 
-        // Associate the pipe and pid with the client connection
-        client->setCgiPipeFd(cgi_pipe[0]);
-        client->setCgiPid(pid);
-        _pipe_to_client_map[cgi_pipe[0]] = client->getFd();
+        // Set the CGI's stdin WRITE end to non-blocking
+        if (fcntl(cgi_stdin_pipe[1], F_SETFL, O_NONBLOCK) < 0) {
+            std::cerr << "CGI Error: fcntl() on stdin pipe failed" << std::endl;
+            kill(pid, SIGKILL); close(cgi_stdout_pipe[0]); close(cgi_stdin_pipe[1]);
+            _sendErrorResponse(client, 500, "Internal Server Error: fcntl() failed");
+            return;
+        }
 
-        // Add the pipe's read end to the master set to be monitored by select()
-        FD_SET(cgi_pipe[0], &_master_set);
-        if (cgi_pipe[0] > _max_fd) {
-            _max_fd = cgi_pipe[0];
+        client->setCgiPipeFd(cgi_stdout_pipe[0]);
+        client->setCgiPid(pid);
+        _pipe_to_client_map[cgi_stdout_pipe[0]] = client->getFd();
+
+        FD_SET(cgi_stdout_pipe[0], &_master_set);
+        if (cgi_stdout_pipe[0] > _max_fd) _max_fd = cgi_stdout_pipe[0];
+
+        HttpRequest req(client->getRequestBuffer());
+        if (req.getMethod() == "POST" && !req.getBody().empty()) {
+            _cgi_stdin_pipe_to_client_map[cgi_stdin_pipe[1]] = client->getFd();
+            FD_SET(cgi_stdin_pipe[1], &_write_fds);
+            if (cgi_stdin_pipe[1] > _max_fd) _max_fd = cgi_stdin_pipe[1];
+        } else {
+            close(cgi_stdin_pipe[1]); // No body to write, close it
         }
     }
 }
@@ -306,7 +334,6 @@ void Server::_handleCgiRead(int pipe_fd) {
     int client_fd = _pipe_to_client_map[pipe_fd];
     if (_clients.find(client_fd) == _clients.end()) {
         // Client connection already closed, clean up CGI process
-        // We need to find the pid associated with this pipe_fd to waitpid
         pid_t cgi_pid = 0;
         for (std::map<int, ClientConnection*>::iterator it = _clients.begin(); it != _clients.end(); ++it) {
             if (it->second->getCgiPipeFd() == pipe_fd) {
@@ -413,6 +440,44 @@ void Server::_handleCgiRead(int pipe_fd) {
         client->setCgiPid(0);
         client->setCgiPipeFd(-1);
     }
+}
+
+void Server::_handleCgiWrite(int pipe_fd) {
+    int client_fd = _cgi_stdin_pipe_to_client_map[pipe_fd];
+    if (_clients.find(client_fd) == _clients.end()) {
+        close(pipe_fd);
+        FD_CLR(pipe_fd, &_write_fds);
+        _cgi_stdin_pipe_to_client_map.erase(pipe_fd);
+        return;
+    }
+    ClientConnection* client = _clients[client_fd];
+    HttpRequest req(client->getRequestBuffer());
+    const std::string& body = req.getBody();
+
+    if (body.empty()) {
+        close(pipe_fd);
+        FD_CLR(pipe_fd, &_write_fds);
+        _cgi_stdin_pipe_to_client_map.erase(pipe_fd);
+        return;
+    }
+
+    ssize_t bytes_written = write(pipe_fd, body.c_str(), body.length());
+
+    if (bytes_written < 0) {
+        // Error handling: could be EAGAIN or a real error
+        std::cerr << "CGI stdin write error" << std::endl;
+        close(pipe_fd);
+        FD_CLR(pipe_fd, &_write_fds);
+        _cgi_stdin_pipe_to_client_map.erase(pipe_fd);
+        return;
+    }
+
+    // In a more robust implementation, you would handle partial writes.
+    // For now, we assume the whole body is written at once.
+    std::cout << "Wrote " << bytes_written << " bytes to CGI stdin" << std::endl;
+    close(pipe_fd);
+    FD_CLR(pipe_fd, &_write_fds);
+    _cgi_stdin_pipe_to_client_map.erase(pipe_fd);
 }
 
 void Server::_handleClientWrite(int client_fd) {

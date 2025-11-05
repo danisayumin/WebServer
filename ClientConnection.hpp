@@ -29,7 +29,11 @@ private:
     int _client_fd;
     std::string _requestBuffer;
     std::string _responseBuffer;
-    bool _is_request_complete;
+
+    // Request parsing state
+    bool _headers_received;
+    size_t _content_length;
+    size_t _body_bytes_read;
 
     // CGI-related members
     pid_t _cgi_pid;

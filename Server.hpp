@@ -19,6 +19,7 @@ private:
     void _handleClientWrite(int client_fd);
     void _handleCgiRead(int pipe_fd);
     void _executeCgi(ClientConnection* client, const LocationConfig* loc);
+    void _handleCgiWrite(int pipe_fd);
     void _sendErrorResponse(ClientConnection* client, int code, const std::string& message);
     int _setupServerSocket(int port);
 
@@ -28,7 +29,8 @@ private:
     fd_set _master_set;
     fd_set _write_fds;
     std::map<int, ClientConnection*> _clients;
-    std::map<int, int> _pipe_to_client_map; // pipe_fd -> client_fd
+    std::map<int, int> _pipe_to_client_map; // Maps CGI stdout pipe READ_END to client_fd
+    std::map<int, int> _cgi_stdin_pipe_to_client_map; // Maps CGI stdin pipe WRITE_END to client_fd
 };
 
 #endif

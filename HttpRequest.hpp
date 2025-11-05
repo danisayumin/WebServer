@@ -15,6 +15,9 @@ public:
     std::string getQueryString() const;
     const std::string& getVersion() const;
     const std::map<std::string, std::string>& getHeaders() const;
+    const std::string getHeader(const std::string& name) const;
+    const std::string& getBody() const;
+    void setBody(const std::string& body);
 
 private:
     void _parse(const std::string& rawRequest);
@@ -23,6 +26,7 @@ private:
     std::string _uri;
     std::string _version;
     std::map<std::string, std::string> _headers;
+    std::string _body;
 };
 
 #endif // HTTPREQUEST_HPP

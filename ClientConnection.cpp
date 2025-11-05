@@ -1,10 +1,14 @@
 #include "ClientConnection.hpp"
+#include "HttpRequest.hpp" // Needed for parsing headers
 #include <unistd.h> // Para read
 #include <iostream>
+#include <cstdlib> // para strtol
 
 ClientConnection::ClientConnection(int client_fd) :
     _client_fd(client_fd),
-    _is_request_complete(false),
+    _headers_received(false),
+    _content_length(0),
+    _body_bytes_read(0),
     _cgi_pid(0),
     _cgi_pipe_fd(-1)
 {
@@ -21,15 +25,30 @@ int ClientConnection::getFd() const {
 
 // Lê dados do socket e anexa ao buffer interno
 ssize_t ClientConnection::readRequest() {
-    char buffer[1024];
+    char buffer[4096]; // Increased buffer size
     ssize_t bytes_read = read(_client_fd, buffer, sizeof(buffer) - 1);
 
     if (bytes_read > 0) {
         buffer[bytes_read] = '\0';
-        _requestBuffer.append(buffer);
-        // Verifica se a requisição está completa
-        if (_requestBuffer.find("\r\n\r\n") != std::string::npos) {
-            _is_request_complete = true;
+        _requestBuffer.append(buffer, bytes_read);
+
+        if (!_headers_received) {
+            size_t headers_end_pos = _requestBuffer.find("\r\n\r\n");
+            if (headers_end_pos != std::string::npos) {
+                _headers_received = true;
+                std::string headers_part = _requestBuffer.substr(0, headers_end_pos);
+                HttpRequest temp_req(headers_part);
+                
+                std::string cl_header = temp_req.getHeader("Content-Length");
+                if (!cl_header.empty()) {
+                    _content_length = std::strtol(cl_header.c_str(), NULL, 10);
+                }
+
+                size_t body_start_pos = headers_end_pos + 4;
+                _body_bytes_read = _requestBuffer.length() - body_start_pos;
+            }
+        } else {
+            _body_bytes_read += bytes_read;
         }
     }
     return bytes_read;
@@ -41,7 +60,10 @@ const std::string& ClientConnection::getRequestBuffer() const {
 }
 
 bool ClientConnection::isRequestComplete() const {
-    return _is_request_complete;
+    if (!_headers_received) {
+        return false;
+    }
+    return _body_bytes_read >= _content_length;
 }
 
 void ClientConnection::setResponse(const std::string& response) {
