@@ -12,6 +12,7 @@ public:
 
     const std::string& getMethod() const;
     const std::string& getUri() const;
+    std::string getQueryString() const;
     const std::string& getVersion() const;
     const std::map<std::string, std::string>& getHeaders() const;
 

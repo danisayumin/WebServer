@@ -2,7 +2,12 @@
 #include <unistd.h> // Para read
 #include <iostream>
 
-ClientConnection::ClientConnection(int client_fd) : _client_fd(client_fd), _is_request_complete(false) {
+ClientConnection::ClientConnection(int client_fd) :
+    _client_fd(client_fd),
+    _is_request_complete(false),
+    _cgi_pid(0),
+    _cgi_pipe_fd(-1)
+{
     // Construtor
 }
 
@@ -39,3 +44,31 @@ bool ClientConnection::isRequestComplete() const {
     return _is_request_complete;
 }
 
+void ClientConnection::setResponse(const std::string& response) {
+    _responseBuffer = response;
+}
+
+const std::string& ClientConnection::getResponseBuffer() const {
+    return _responseBuffer;
+}
+
+void ClientConnection::clearResponseBuffer() {
+    _responseBuffer.clear();
+}
+
+// CGI-related methods
+void ClientConnection::setCgiPid(pid_t pid) {
+    _cgi_pid = pid;
+}
+
+pid_t ClientConnection::getCgiPid() const {
+    return _cgi_pid;
+}
+
+void ClientConnection::setCgiPipeFd(int fd) {
+    _cgi_pipe_fd = fd;
+}
+
+int ClientConnection::getCgiPipeFd() const {
+    return _cgi_pipe_fd;
+}

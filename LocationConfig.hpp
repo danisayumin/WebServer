@@ -8,7 +8,8 @@ struct LocationConfig {
     std::string path;
     std::string root;
     std::string index;
-    std::vector<std::string> cgi_pass;
+    std::string cgi_path;
+    std::string cgi_ext;
     // Mais diretivas no futuro
 };
 

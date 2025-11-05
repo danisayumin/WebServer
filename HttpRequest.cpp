@@ -37,3 +37,11 @@ const std::string& HttpRequest::getVersion() const {
 const std::map<std::string, std::string>& HttpRequest::getHeaders() const {
     return _headers;
 }
+
+std::string HttpRequest::getQueryString() const {
+    size_t pos = _uri.find('?');
+    if (pos != std::string::npos) {
+        return _uri.substr(pos + 1);
+    }
+    return "";
+}
