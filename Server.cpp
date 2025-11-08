@@ -11,7 +11,7 @@
 #include <netinet/in.h>
 #include <fcntl.h>
 #include <unistd.h>
-#include <cstdio>
+#include <cstdio> // For std::remove
 #include <cstring>
 #include <cstdlib>
 #include <sys/wait.h>
@@ -152,9 +152,77 @@ void Server::_handleClientData(int client_fd) {
                 _executeCgi(client, matched_location);
                 return;
             }
-            
-            if (req.getMethod() == "POST") { // Handle POST for non-CGI
-                res.setStatusCode(405, "Method Not Allowed");
+
+            if (req.getMethod() == "DELETE") {
+                std::string root = _config.getRoot();
+                if (matched_location && !matched_location->root.empty()) {
+                    root = matched_location->root;
+                }
+                std::string filePath = root + req.getUri();
+
+                if (access(filePath.c_str(), F_OK) == 0) {
+                    if (std::remove(filePath.c_str()) == 0) {
+                        res.setStatusCode(204, "No Content");
+                    } else {
+                        if (errno == EACCES) {
+                            res.setStatusCode(403, "Forbidden");
+                        } else {
+                            res.setStatusCode(500, "Internal Server Error");
+                        }
+                    }
+                } else {
+                    res.setStatusCode(404, "Not Found");
+                }
+            } else if (req.getMethod() == "POST") {
+                if (req.getUri() == "/upload") {
+                    std::string content_type = req.getHeader("Content-Type");
+                    if (content_type.find("multipart/form-data") != std::string::npos) {
+                        const std::vector<HttpRequest::UploadedFile>& uploadedFiles = req.getUploadedFiles();
+                        if (uploadedFiles.empty()) {
+                            res.setStatusCode(400, "Bad Request");
+                            res.setBody("No files uploaded.");
+                        } else {
+                            bool all_saved = true;
+                            for (size_t i = 0; i < uploadedFiles.size(); ++i) {
+                                const HttpRequest::UploadedFile& file = uploadedFiles[i];
+                                std::string safe_filename = "www/uploads/";
+                                // Basic sanitization: remove path separators
+                                size_t last_slash = file.filename.find_last_of("/");
+                                if (last_slash == std::string::npos) {
+                                    last_slash = file.filename.find_last_of("\\");
+                                }
+                                if (last_slash != std::string::npos) {
+                                    safe_filename += file.filename.substr(last_slash + 1);
+                                } else {
+                                    safe_filename += file.filename;
+                                }
+
+                                std::ofstream outfile(safe_filename.c_str(), std::ios::binary);
+                                if (outfile.is_open()) {
+                                    outfile.write(file.content.c_str(), file.content.length());
+                                    outfile.close();
+                                    std::cout << "Uploaded file saved to: " << safe_filename << std::endl;
+                                } else {
+                                    std::cerr << "Failed to save uploaded file: " << safe_filename << std::endl;
+                                    all_saved = false;
+                                    break;
+                                }
+                            }
+                            if (all_saved) {
+                                res.setStatusCode(200, "OK");
+                                res.setBody("File(s) uploaded successfully!");
+                            } else {
+                                res.setStatusCode(500, "Internal Server Error");
+                                res.setBody("Failed to save some files.");
+                            }
+                        }
+                    } else {
+                        res.setStatusCode(400, "Bad Request");
+                        res.setBody("Unsupported Content-Type for /upload.");
+                    }
+                } else { // Other POST requests
+                    res.setStatusCode(405, "Method Not Allowed");
+                }
             } else if (req.getMethod() != "GET") {
                 res.setStatusCode(405, "Method Not Allowed");
             } else {

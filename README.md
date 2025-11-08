@@ -13,14 +13,30 @@ O servidor está funcional e é capaz de servir um site estático simples. Ele c
 ## Funcionalidades Implementadas
 
 - [x] **Build System**: Compilação automatizada com `make`.
-- [x] **Parsing de Configuração**: O servidor lê um arquivo de configuração para definir porta, diretório raiz, etc.
-- [x] **Arquitetura Não-Bloqueante**: Loop de eventos principal com `select()` para I/O multiplexada, capaz de lidar com múltiplos clientes sem bloquear.
-- [x] **Gerenciamento de Conexão**: Aceita e gerencia o ciclo de vida de conexões de clientes, incluindo desconexões.
-- [x] **Parsing de Requisição HTTP**: Analisa requisições HTTP para extrair o método e o URI, aguardando a requisição completa (`\r\n\r\n`) antes de processar.
-- [x] **Roteamento de Métodos**: Aceita apenas requisições `GET` e rejeita as demais com `405 Method Not Allowed`.
-- [x] **Servir Arquivos Estáticos**: Encontra e retorna o conteúdo de arquivos solicitados (ex: `index.html`, `style.css`).
-- [x] **Suporte a MIME Types**: Identifica o tipo de arquivo e envia o `Content-Type` correto (ex: `text/html`, `text/css`).
-- [x] **Geração de Respostas de Erro**: Gera respostas para `404 Not Found` e `405 Method Not Allowed`.
+- [x] **Parsing de Configuração**: O servidor lê um arquivo de configuração para definir porta e diretório raiz.
+- [x] **Arquitetura Não-Bloqueante**: Loop de eventos principal com `select()` para I/O multiplexada.
+- [x] **Gerenciamento de Conexão**: Aceita e gerencia o ciclo de vida de conexões de clientes.
+- [x] **Parsing de Requisição HTTP**: Analisa requisições para extrair método, URI, cabeçalhos e corpo.
+- [x] **Método GET**: Serve arquivos estáticos (HTML, CSS, etc.).
+- [x] **Método POST**:
+    - Suporte a upload de arquivos (`multipart/form-data`).
+    - Execução de scripts CGI passando o corpo da requisição.
+- [x] **Método DELETE**: Remove recursos (arquivos) do servidor.
+- [x] **CGI (Common Gateway Interface)**: Executa scripts (Python) para gerar conteúdo dinâmico para requisições GET e POST.
+- [x] **Suporte a MIME Types**: Identifica e envia o `Content-Type` correto.
+- [x] **Geração de Respostas de Erro**: Gera respostas para `403`, `404`, `405`, `500`, etc.
+
+## Conceitos Fundamentais
+
+### URI (Uniform Resource Identifier)
+
+A **URI** é uma string de caracteres que identifica de forma única um recurso na web. Pense nela como um "endereço" ou um "identificador" para qualquer coisa que possa ser nomeada, como uma página HTML, uma imagem, ou um script.
+
+- **URL (Uniform Resource Locator)**: É o tipo mais comum de URI. Além de identificar o recurso, ela também informa **como localizá-lo**. A URL `http://localhost:8080/index.html` é uma URI que diz: "use o protocolo `http` para acessar o recurso `/index.html` no host `localhost` na porta `8080`".
+
+- **URN (Uniform Resource Name)**: É outro tipo de URI que apenas dá um nome único a um recurso, mas não diz como encontrá-lo (ex: `urn:isbn:0451450523`).
+
+**No nosso projeto**, quando falamos em "URI", estamos nos referindo à parte do caminho da URL que vem depois do host e da porta (ex: `/index.html`, `/cgi-bin/script.py`). O servidor usa essa URI para decidir qual arquivo servir, qual script executar ou qual recurso deletar.
 
 ## Como Usar e Testar
 
@@ -143,8 +159,18 @@ Esta seção detalha a jornada completa de uma requisição HTTP, desde o navega
 
 ## Próximos Passos
 
-- [ ] **Roteamento Avançado**: Implementar o parsing e a lógica dos blocos `location`.
-- [ ] **Conteúdo Dinâmico (CGI)**: Adicionar a capacidade de executar scripts para gerar respostas.
-- [ ] **Suporte a POST**: Implementar o tratamento do corpo de requisições, necessário para uploads de arquivos e formulários.
-- [ ] **Gerenciamento de Escrita Não-Bloqueante**: Usar o `select()` também para escritas (`write_fds`) para lidar com o envio de arquivos grandes sem bloquear o servidor.
-- [ ] **Melhorar Parsing de Configuração**: Tornar o parser mais robusto e capaz de lidar com múltiplas seções `server`.
+
+
+- [ ] **Parsing de Configuração Avançado**: Melhorar o parser para suportar todas as diretivas obrigatórias do PDF, como:
+
+    - Múltiplas portas (`listen`).
+
+    - Limite de tamanho do corpo da requisição (`client_max_body_size`).
+
+    - Páginas de erro customizadas.
+
+    - Regras por `location` (métodos aceitos, redirecionamento, etc.).
+
+- [ ] **Suporte a `Transfer-Encoding: chunked`**: Implementar a lógica para "desagrupar" requisições enviadas em partes.
+
+- [ ] **Robustez Geral**: Continuar testando e melhorando o tratamento de erros para todos os cenários inesperados, garantindo que o servidor nunca trave.

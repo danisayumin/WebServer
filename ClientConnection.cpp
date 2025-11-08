@@ -25,7 +25,7 @@ int ClientConnection::getFd() const {
 
 // Lê dados do socket e anexa ao buffer interno
 ssize_t ClientConnection::readRequest() {
-    char buffer[4096]; // Increased buffer size
+    char buffer[4096];
     ssize_t bytes_read = read(_client_fd, buffer, sizeof(buffer) - 1);
 
     if (bytes_read > 0) {
@@ -36,14 +36,18 @@ ssize_t ClientConnection::readRequest() {
             size_t headers_end_pos = _requestBuffer.find("\r\n\r\n");
             if (headers_end_pos != std::string::npos) {
                 _headers_received = true;
-                std::string headers_part = _requestBuffer.substr(0, headers_end_pos);
-                HttpRequest temp_req(headers_part);
                 
-                std::string cl_header = temp_req.getHeader("Content-Length");
-                if (!cl_header.empty()) {
-                    _content_length = std::strtol(cl_header.c_str(), NULL, 10);
+                // Manually parse Content-Length
+                size_t cl_pos = _requestBuffer.find("Content-Length: ");
+                if (cl_pos != std::string::npos) {
+                    cl_pos += 16; // length of "Content-Length: "
+                    size_t cl_end_pos = _requestBuffer.find("\r\n", cl_pos);
+                    if (cl_end_pos != std::string::npos) {
+                        std::string cl_value = _requestBuffer.substr(cl_pos, cl_end_pos - cl_pos);
+                        _content_length = std::strtol(cl_value.c_str(), NULL, 10);
+                    }
                 }
-
+                
                 size_t body_start_pos = headers_end_pos + 4;
                 _body_bytes_read = _requestBuffer.length() - body_start_pos;
             }
@@ -53,7 +57,6 @@ ssize_t ClientConnection::readRequest() {
     }
     return bytes_read;
 }
-
 // Retorna o buffer com os dados da requisição
 const std::string& ClientConnection::getRequestBuffer() const {
     return _requestBuffer;
