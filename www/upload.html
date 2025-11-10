@@ -1,23 +1,26 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>File Upload</title>
-    <style>
-        body { font-family: sans-serif; background-color: #333; color: #eee; text-align: center; margin-top: 50px; }
-        h1 { color: #4CAF50; }
-        form { background-color: #444; margin: 20px auto; padding: 30px; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.2); max-width: 500px; }
-        input[type="file"] { border: 1px solid #555; padding: 10px; background-color: #555; color: #eee; border-radius: 4px; margin-bottom: 20px; width: calc(100% - 22px); }
-        input[type="submit"] { background-color: #4CAF50; color: white; padding: 12px 20px; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; }
-        input[type="submit"]:hover { background-color: #45a049; }
-        p { color: #bbb; }
-    </style>
+    <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <h1>Upload Your File</h1>
-    <form action="/upload" method="post" enctype="multipart/form-data">
-        <input type="file" name="myFile" id="myFile">
-        <input type="submit" value="Upload File">
-    </form>
-    <p>Select a file and click 'Upload File' to send it to the server.</p>
+    <nav>
+        <ul>
+            <li><a href="/">Home</a></li>
+            <li><a href="/upload.html">Upload</a></li>
+            <li><a href="/secret/secret.html">Secret</a></li>
+        </ul>
+    </nav>
+    <div class="container">
+        <h1>Upload Your File</h1>
+        <form action="/upload_here" method="post" enctype="multipart/form-data">
+            <input type="file" name="myFile" id="myFile">
+            <input type="submit" value="Upload File">
+        </form>
+        <p>Select a file and click 'Upload File' to send it to the server.</p>
+    </div>
 </body>
 </html>

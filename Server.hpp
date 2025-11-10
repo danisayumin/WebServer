@@ -9,8 +9,9 @@
 
 class Server {
 public:
-    explicit Server(const ConfigParser& config);
+    Server(const ConfigParser& config);
     ~Server();
+
     void run();
 
 private:
@@ -20,11 +21,11 @@ private:
     void _handleCgiRead(int pipe_fd);
     void _executeCgi(ClientConnection* client, const LocationConfig* loc);
     void _handleCgiWrite(int pipe_fd);
-    void _sendErrorResponse(ClientConnection* client, int code, const std::string& message);
-    int _setupServerSocket(int port);
+    void _sendErrorResponse(ClientConnection* client, int code, const std::string& message, const LocationConfig* loc);
+    int _setupServerSocket(int port); // Helper to setup a single socket
 
     const ConfigParser& _config;
-    int _listen_fd;
+    std::vector<int> _listen_fds; // Changed to vector
     int _max_fd;
     fd_set _master_set;
     fd_set _write_fds;

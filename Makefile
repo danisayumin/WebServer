@@ -6,7 +6,7 @@ CXX = c++
 CXXFLAGS = -Wall -Wextra -Werror -std=c++98
 
 # Arquivos fonte (adicione seus arquivos .cpp aqui)
-SRCS = main.cpp Server.cpp ClientConnection.cpp ConfigParser.cpp HttpRequest.cpp HttpResponse.cpp
+SRCS = main.cpp Server.cpp ClientConnection.cpp ConfigParser.cpp HttpRequest.cpp HttpResponse.cpp HttpRequestParser.cpp
 
 # Arquivos objeto
 OBJS = $(SRCS:.cpp=.o)

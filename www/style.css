@@ -1,16 +1,185 @@
-body {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-    text-align: center;
-    margin-top: 100px;
-    background-color: #282c34;
-    color: white;
+:root {
+    /* CSS HEX */
+    --white: #fffeffff;
+    --fuchsia: #ff01fbff;
+    --picton-blue: #02a9eaff;
+    --yellow: #faff00ff;
+    --night: #00100bff;
 }
 
-h1 {
-    color: #61dafb;
-    font-size: 3rem;
+body {
+    font-family: 'Press Start 2P', cursive; /* Placeholder, will use a generic pixelated font or similar */
+    text-align: center;
+    margin: 0;
+    padding: 20px;
+    background-color: var(--night);
+    color: var(--white);
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+    justify-content: center;
+    align-items: center;
+    text-shadow: 2px 2px var(--fuchsia); /* Pixelated text effect */
+}
+
+h1, h2, h3 {
+    color: var(--yellow);
+    text-shadow: 3px 3px var(--picton-blue);
+    margin-bottom: 20px;
 }
 
 p {
     font-size: 1.2rem;
+    line-height: 1.5;
+    margin-bottom: 15px;
+}
+
+a {
+    color: var(--picton-blue);
+    text-decoration: none;
+    transition: color 0.3s ease;
+}
+
+a:hover {
+    color: var(--fuchsia);
+    text-decoration: underline;
+}
+
+/* Navigation Bar */
+nav {
+    background-color: var(--fuchsia);
+    padding: 10px 0;
+    margin-bottom: 30px;
+    border-bottom: 5px solid var(--yellow);
+    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.5);
+    width: 100%;
+    position: fixed;
+    top: 0;
+    left: 0;
+    z-index: 1000;
+}
+
+nav ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    justify-content: center;
+}
+
+nav ul li {
+    margin: 0 15px;
+}
+
+nav ul li a {
+    display: block;
+    padding: 10px 20px;
+    background-color: var(--night);
+    color: var(--white);
+    border: 2px solid var(--picton-blue);
+    border-radius: 5px;
+    text-transform: uppercase;
+    font-weight: bold;
+    letter-spacing: 1px;
+    box-shadow: 3px 3px 0px var(--yellow);
+    transition: all 0.2s ease;
+}
+
+nav ul li a:hover {
+    background-color: var(--picton-blue);
+    color: var(--night);
+    box-shadow: 3px 3px 0px var(--fuchsia);
+    transform: translate(-2px, -2px);
+}
+
+/* Form Styling (for upload.html) */
+form {
+    background-color: var(--night);
+    border: 3px solid var(--picton-blue);
+    padding: 30px;
+    border-radius: 10px;
+    box-shadow: 5px 5px 0px var(--fuchsia);
+    max-width: 600px;
+    margin: 30px auto;
+}
+
+input[type="file"],
+input[type="submit"] {
+    font-family: 'Press Start 2P', cursive; /* Placeholder */
+    padding: 10px 20px;
+    margin: 10px 0;
+    border: 2px solid var(--yellow);
+    background-color: var(--picton-blue);
+    color: var(--white);
+    text-transform: uppercase;
+    font-weight: bold;
+    cursor: pointer;
+    box-shadow: 3px 3px 0px var(--fuchsia);
+    transition: all 0.2s ease;
+}
+
+input[type="submit"]:hover {
+    background-color: var(--fuchsia);
+    border-color: var(--picton-blue);
+    box-shadow: 3px 3px 0px var(--yellow);
+    transform: translate(-2px, -2px);
+}
+
+/* Specific styles for 404 page */
+.error-container {
+    background-color: var(--night);
+    border: 3px solid var(--fuchsia);
+    padding: 40px;
+    border-radius: 10px;
+    box-shadow: 5px 5px 0px var(--yellow);
+    max-width: 700px;
+    margin: 50px auto;
+}
+
+.error-container h1 {
+    color: var(--fuchsia);
+    text-shadow: 3px 3px var(--yellow);
+}
+
+.error-container p {
+    color: var(--white);
+}
+
+/* Secret page styling */
+.secret-container {
+    background-color: var(--night);
+    border: 3px solid var(--yellow);
+    padding: 50px;
+    border-radius: 15px;
+    box-shadow: 7px 7px 0px var(--picton-blue);
+    max-width: 800px;
+    margin: 50px auto;
+    animation: glow 1.5s infinite alternate;
+}
+
+.secret-container h1 {
+    color: var(--fuchsia);
+    text-shadow: 5px 5px var(--white);
+    font-size: 4rem;
+}
+
+.secret-container p {
+    color: var(--picton-blue);
+    font-size: 1.5rem;
+}
+
+@keyframes glow {
+    from { box-shadow: 7px 7px 0px var(--picton-blue), 0 0 10px var(--picton-blue); }
+    to { box-shadow: 7px 7px 0px var(--picton-blue), 0 0 20px var(--fuchsia); }
+}
+
+/* General container for main content */
+.container {
+    background-color: var(--night);
+    border: 3px solid var(--picton-blue);
+    padding: 30px;
+    border-radius: 10px;
+    box-shadow: 5px 5px 0px var(--fuchsia);
+    max-width: 800px;
+    margin: 30px auto;
 }

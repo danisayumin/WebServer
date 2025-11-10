@@ -5,13 +5,19 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Welcome to webserv!</title>
     <link rel="stylesheet" href="style.css">
-    <style>
-        body { font-family: sans-serif; text-align: center; margin-top: 100px; background-color: #f0f0f0; }
-        h1 { color: #333; }
-    </style>
 </head>
 <body>
-    <h1>Hello from your C++ webserv!</h1>
-    <p>This page is being served by a custom HTTP server written in C++98.</p>
+    <nav>
+        <ul>
+            <li><a href="/">Home</a></li>
+            <li><a href="/upload.html">Upload</a></li>
+            <li><a href="/secret/secret.html">Secret</a></li>
+        </ul>
+    </nav>
+    <div class="container">
+        <h1>Hello from your C++ webserv!</h1>
+        <p>This page is being served by a custom HTTP server written in C++98.</p>
+        <p>Explore the site using the navigation above!</p>
+    </div>
 </body>
 </html>
