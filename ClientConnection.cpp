@@ -15,12 +15,15 @@
 #include "HttpRequestParser.hpp"
 #include "HttpRequest.hpp"
 #include "ConfigParser.hpp" // Include ConfigParser.hpp for LocationConfig definition
+#include "ServerConfig.hpp"
 
- ClientConnection::ClientConnection(int client_fd) :
-     _fd(client_fd), // Corrected
-     _cgiPid(0), // Corrected
-    _cgiPipeFd(-1), // Corrected
-    _cgiLocation(NULL) // Corrected
+ ClientConnection::ClientConnection(int client_fd, int port) :
+     _fd(client_fd),
+     _port(port),
+     _server_config(NULL),
+     _location_config(NULL),
+     _cgiPid(0),
+    _cgiPipeFd(-1)
  {
      _parser = new HttpRequestParser(); // Initialize _parser
  }
@@ -30,7 +33,11 @@ ClientConnection::~ClientConnection() {
 }
 
 int ClientConnection::getFd() const {
-    return _fd; // Corrected
+    return _fd;
+}
+
+int ClientConnection::getPort() const {
+    return _port;
 }
 
 // Lê dados do socket e anexa ao buffer interno
@@ -80,27 +87,36 @@ void ClientConnection::clearResponseBuffer() {
     _responseBuffer.clear();
 }
 
+// Config context
+void ClientConnection::setServerConfig(const ServerConfig* sc) {
+    _server_config = sc;
+}
+
+const ServerConfig* ClientConnection::getServerConfig() const {
+    return _server_config;
+}
+
+void ClientConnection::setLocationConfig(const LocationConfig* lc) {
+    _location_config = lc;
+}
+
+const LocationConfig* ClientConnection::getLocationConfig() const {
+    return _location_config;
+}
+
 // CGI-related methods
 void ClientConnection::setCgiPid(pid_t pid) {
-    _cgiPid = pid; // Corrected
+    _cgiPid = pid;
 }
 
 pid_t ClientConnection::getCgiPid() const {
-    return _cgiPid; // Corrected
+    return _cgiPid;
 }
 
 void ClientConnection::setCgiPipeFd(int fd) {
-    _cgiPipeFd = fd; // Corrected
+    _cgiPipeFd = fd;
 }
 
 int ClientConnection::getCgiPipeFd() const {
-    return _cgiPipeFd; // Corrected
-}
-
-void ClientConnection::setCgiLocation(const LocationConfig* loc) {
-    _cgiLocation = loc; // Corrected
-}
-
-const LocationConfig* ClientConnection::getCgiLocation() const {
-    return _cgiLocation; // Corrected
+    return _cgiPipeFd;
 }

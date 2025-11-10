@@ -42,3 +42,11 @@
 
 #gemini
 gemini.md
+
+# Project specific ignores
+webserv
+www/uploads/
+*.txt
+evaluation.md
+test_chunked
+WEBSERV.pdf

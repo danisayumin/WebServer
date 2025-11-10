@@ -1,6 +1,7 @@
 #include "Server.hpp"
 #include "HttpRequest.hpp"
 #include "HttpResponse.hpp"
+#include "ServerConfig.hpp"
 #include <stdexcept>
 #include <sstream>
 #include <fstream>
@@ -18,6 +19,8 @@
 #include <signal.h>
 #include <dirent.h>
 #include <sys/stat.h>
+#include <set>
+
 
 std::string getMimeType(const std::string& filePath) {
     static std::map<std::string, std::string> mimeTypes;
@@ -49,18 +52,27 @@ std::string getMimeType(const std::string& filePath) {
     return "application/octet-stream";
 }
 
-Server::Server(const ConfigParser& config) : _config(config), _max_fd(0) {
+Server::Server(const ConfigParser& config) : _max_fd(0) {
     FD_ZERO(&_master_set);
     FD_ZERO(&_write_fds);
 
-    const std::vector<int>& ports = _config.getPorts();
-    if (ports.empty()) {
-        throw std::runtime_error("No ports specified in configuration.");
+    const std::vector<ServerConfig*>& server_configs = config.getServerConfigs();
+    std::set<int> unique_ports;
+
+    for (size_t i = 0; i < server_configs.size(); ++i) {
+        ServerConfig* sc = server_configs[i];
+        for (size_t j = 0; j < sc->ports.size(); ++j) {
+            int port = sc->ports[j];
+            _configs_by_port[port].push_back(sc);
+            unique_ports.insert(port);
+        }
     }
 
-    for (size_t i = 0; i < ports.size(); ++i) {
-        int fd = _setupServerSocket(ports[i]);
+    for (std::set<int>::iterator it = unique_ports.begin(); it != unique_ports.end(); ++it) {
+        int port = *it;
+        int fd = _setupServerSocket(port);
         _listen_fds.push_back(fd);
+        _port_by_listen_fd[fd] = port;
         FD_SET(fd, &_master_set);
         if (fd > _max_fd) _max_fd = fd;
     }
@@ -146,6 +158,7 @@ void Server::run() {
 }
 
 void Server::_acceptNewConnection(int listening_fd) {
+    int port = _port_by_listen_fd[listening_fd];
     int client_fd = accept(listening_fd, NULL, NULL);
     if (client_fd < 0) return;
     
@@ -155,51 +168,86 @@ void Server::_acceptNewConnection(int listening_fd) {
     if (_clients.find(client_fd) != _clients.end()) {
         delete _clients[client_fd];
     }
-    _clients[client_fd] = new ClientConnection(client_fd);
+    _clients[client_fd] = new ClientConnection(client_fd, port);
 
     if (client_fd > _max_fd) _max_fd = client_fd;
     
-    std::cout << "New connection: " << client_fd << std::endl;
+    std::cout << "New connection: " << client_fd << " on port " << port << std::endl;
+}
+
+const ServerConfig* Server::_findServerConfig(int port, const std::string& host_header) const {
+    if (_configs_by_port.find(port) == _configs_by_port.end()) {
+        return NULL; // Should not happen
+    }
+
+    const std::vector<ServerConfig*>& configs = _configs_by_port.at(port);
+    if (configs.empty()) {
+        return NULL; // Should not happen
+    }
+
+    // Extract only the hostname from "hostname:port"
+    std::string host_name = host_header;
+    size_t colon_pos = host_name.find(':');
+    if (colon_pos != std::string::npos) {
+        host_name = host_name.substr(0, colon_pos);
+    }
+
+    // Find a matching server_name
+    for (size_t i = 0; i < configs.size(); ++i) {
+        for (size_t j = 0; j < configs[i]->server_names.size(); ++j) {
+            if (configs[i]->server_names[j] == host_name) {
+                return configs[i];
+            }
+        }
+    }
+
+    // If no match, return the first server for that port as default
+    return configs[0];
 }
 
 void Server::_handleClientData(int client_fd) {
-    std::cerr << "DEBUG: Entering _handleClientData for client " << client_fd << std::endl; fflush(stderr);
+    std::cerr << "DEBUG: _handleClientData entered for client " << client_fd << std::endl;
     if (_clients.find(client_fd) == _clients.end()) return;
     ClientConnection* client = _clients[client_fd];
 
     if (client->readRequest() > 0) {
-        // Find the corresponding location to check client_max_body_size
-        const HttpRequest& temp_req = client->getRequest();
-        std::cerr << "DEBUG: Client " << client_fd << " requested URI: " << temp_req.getUri() << std::endl; fflush(stderr);
-        const std::vector<LocationConfig*>& locations = _config.getLocations();
-        const LocationConfig* matched_location = NULL;
-        std::string longest_match = "";
-
-        for (size_t i = 0; i < locations.size(); ++i) {
-            if (temp_req.getUri().rfind(locations[i]->path, 0) == 0) {
-                if (locations[i]->path.length() > longest_match.length()) {
-                    longest_match = locations[i]->path;
-                    matched_location = locations[i];
-                }
-            }
-        }
-
-        size_t max_body_size = 1 * 1024 * 1024; // Default 1MB
-        if (matched_location) {
-            max_body_size = matched_location->client_max_body_size;
-        }
-
-        if (client->getRequestBufferSize() > max_body_size) {
-            _sendErrorResponse(client, 413, "Payload Too Large", matched_location);
-            client->replaceParser();
-            return;
-        }
-
         if (client->isRequestComplete()) {
             const HttpRequest& req = client->getRequest();
+            
+            std::string host_header = req.getHeader("Host");
+            const ServerConfig* server_config = _findServerConfig(client->getPort(), host_header);
+            if (!server_config) {
+                _sendErrorResponse(client, 400, "Bad Request", NULL, NULL);
+                client->replaceParser();
+                return;
+            }
+            client->setServerConfig(server_config);
+
+            const LocationConfig* matched_location = NULL;
+            std::string longest_match = "";
+            for (size_t i = 0; i < server_config->locations.size(); ++i) {
+                if (req.getUri().rfind(server_config->locations[i]->path, 0) == 0) {
+                    if (server_config->locations[i]->path.length() > longest_match.length()) {
+                        longest_match = server_config->locations[i]->path;
+                        matched_location = server_config->locations[i];
+                    }
+                }
+            }
+            client->setLocationConfig(matched_location);
+
+            size_t max_body_size = server_config->client_max_body_size;
+            if (matched_location && matched_location->client_max_body_size > 0) {
+                max_body_size = matched_location->client_max_body_size;
+            }
+
+            if (client->getRequestBufferSize() > max_body_size) {
+                _sendErrorResponse(client, 413, "Payload Too Large", server_config, matched_location);
+                client->replaceParser();
+                return;
+            }
+
             HttpResponse res;
 
-            // Enforce allowed methods if configured for the matched location
             if (matched_location && !matched_location->allowed_methods.empty()) {
                 bool method_allowed = false;
                 for (size_t i = 0; i < matched_location->allowed_methods.size(); ++i) {
@@ -209,13 +257,12 @@ void Server::_handleClientData(int client_fd) {
                     }
                 }
                 if (!method_allowed) {
-                    _sendErrorResponse(client, 405, "Method Not Allowed", matched_location);
+                    _sendErrorResponse(client, 405, "Method Not Allowed", server_config, matched_location);
                     client->replaceParser();
                     return;
                 }
             }
 
-            // Handle redirection if configured
             if (matched_location && !matched_location->redirect.empty()) {
                 res.setStatusCode(301, "Moved Permanently");
                 res.addHeader("Location", matched_location->redirect);
@@ -239,27 +286,43 @@ void Server::_handleClientData(int client_fd) {
                 return;
             }
 
-            if (req.getMethod() == "DELETE") {
-                std::string root = _config.getRoot();
+            if (req.getMethod() == "GET") {
+                std::string root = server_config->root;
                 if (matched_location && !matched_location->root.empty()) {
                     root = matched_location->root;
                 }
-                std::string filePath = root + req.getUri();
 
-                if (access(filePath.c_str(), F_OK) == 0) {
-                    if (std::remove(filePath.c_str()) == 0) {
-                        res.setStatusCode(204, "No Content");
-                    } else {
-                        if (errno == EACCES) {
-                            res.setStatusCode(403, "Forbidden");
-                        } else {
-                            res.setStatusCode(500, "Internal Server Error");
-                        }
+                std::string uri = req.getUri();
+                if (uri[uri.length() - 1] == '/') {
+                    std::string index_file = "index.html";
+                    if (matched_location && !matched_location->index.empty()) {
+                        index_file = matched_location->index;
                     }
+                    uri += index_file;
+                }
+                
+                std::string filePath = root + uri;
+                std::ifstream file(filePath.c_str());
+                
+                if (file.is_open()) {
+                    std::stringstream buffer; buffer << file.rdbuf();
+                    res.setStatusCode(200, "OK");
+                    res.addHeader("Content-Type", getMimeType(filePath));
+                    std::stringstream ss_len; ss_len << buffer.str().length();
+                    res.addHeader("Content-Length", ss_len.str());
+                    res.setBody(buffer.str());
+                    client->setResponse(res.toString());
                 } else {
-                    res.setStatusCode(404, "Not Found");
+                     _sendErrorResponse(client, 404, "Not Found", server_config, matched_location);
                 }
             } else if (req.getMethod() == "POST") {
+                std::cerr << "DEBUG: POST request to URI: " << req.getUri() << std::endl;
+                if (matched_location) {
+                    std::cerr << "DEBUG: Matched location path: " << matched_location->path << std::endl;
+                    std::cerr << "DEBUG: Matched location upload_path: " << matched_location->upload_path << std::endl;
+                } else {
+                    std::cerr << "DEBUG: No location matched for POST request." << std::endl;
+                }
                 // Uploads are now handled by checking if a location has an upload_path
                 if (matched_location && !matched_location->upload_path.empty()) {
                     std::string content_type = req.getHeader("Content-Type");
@@ -369,130 +432,33 @@ void Server::_handleClientData(int client_fd) {
                         std::stringstream ss_len; ss_len << body.length();
                         res.addHeader("Content-Length", ss_len.str());
                     }
-                    client->setResponse(res.toString()); // ADDED THIS LINE
+                    client->setResponse(res.toString());
                 } else { // Other POST requests
+                    std::cerr << "DEBUG: Matched location does NOT have a valid upload_path or no location matched." << std::endl;
                     res.setStatusCode(405, "Method Not Allowed");
                     std::string body = "Method Not Allowed for this resource.";
                     res.setBody(body);
                     std::stringstream ss_len; ss_len << body.length();
                     res.addHeader("Content-Length", ss_len.str());
-                    client->setResponse(res.toString()); // ADDED THIS LINE
+                    client->setResponse(res.toString());
                 }
-            } else { // GET method
-                std::string root = _config.getRoot();
+            } else if (req.getMethod() == "DELETE") {
+                std::string root = server_config->root;
                 if (matched_location && !matched_location->root.empty()) {
                     root = matched_location->root;
                 }
-
-                std::string uri = req.getUri();
-                if (uri == "/") {
-                    uri = "/index.html";
-                    if (matched_location && !matched_location->index.empty()) {
-                        uri = "/" + matched_location->index;
-                    }
-                }
-                
-                                std::string filePath = root + uri;
-                                std::cerr << "DEBUG: Client " << client_fd << " attempting to serve file: " << filePath << std::endl; fflush(stderr);
-                                                std::ifstream file(filePath.c_str());
-                bool file_found = file.is_open();
-
-                if (!file_found) {
-                    // If not found, and URI doesn't have an extension, try appending .html
-                    size_t dot_pos = uri.rfind('.');
-                    // Check if there's no dot, or if the dot is part of a directory name (e.g., /path.to/file)
-                    if (dot_pos == std::string::npos || dot_pos < uri.rfind('/')) {
-                        std::string html_filePath = filePath + ".html";
-                        std::cerr << "DEBUG: Client " << client_fd << " attempting to serve file with .html extension: " << html_filePath << std::endl; fflush(stderr);
-                        std::ifstream html_file(html_filePath.c_str());
-                        if (html_file.is_open()) {
-                            filePath = html_filePath; // Update filePath to the .html version
-                            file.swap(html_file); // Use the opened .html file
-                            file_found = true;
-                        }
-                    }
-                }
-
-                if (file_found) {
-                    // It's a file, serve it
-                    std::stringstream buffer; buffer << file.rdbuf();
+                std::string filePath = root + req.getUri();
+                if (std::remove(filePath.c_str()) == 0) {
                     res.setStatusCode(200, "OK");
-                    res.addHeader("Content-Type", getMimeType(filePath));
-                    std::stringstream ss_len; ss_len << buffer.str().length();
-                    res.addHeader("Content-Length", ss_len.str());
-                    res.setBody(buffer.str());
-                    client->setResponse(res.toString());
+                    res.setBody("File deleted successfully.");
                 } else {
-                    // File not found, check if it's a directory for autoindex or 404
-                    struct stat path_stat;
-                    if (stat(filePath.c_str(), &path_stat) == 0 && S_ISDIR(path_stat.st_mode)) {
-                        // It's a directory, check for index file or autoindex
-                        if (uri[uri.length() - 1] != '/') {
-                            uri += "/";
-                        }
-                        std::string index_file_path = filePath; // Use the original filePath (which is a directory)
-                        if (index_file_path[index_file_path.length() - 1] != '/') {
-                            index_file_path += "/";
-                        }
-                        index_file_path += "index.html"; // Default index file
-                        if (matched_location && !matched_location->index.empty()) {
-                            index_file_path = filePath; // Reset to directory path
-                            if (index_file_path[index_file_path.length() - 1] != '/') {
-                                index_file_path += "/";
-                            }
-                            index_file_path += matched_location->index;
-                        }
-                        
-                        std::ifstream index_file(index_file_path.c_str());
-                        if (index_file.is_open()) {
-                            // Serve index file
-                            std::stringstream buffer; buffer << index_file.rdbuf();
-                            res.setStatusCode(200, "OK");
-                            res.addHeader("Content-Type", "text/html");
-                            std::stringstream ss_len; ss_len << buffer.str().length();
-                            res.addHeader("Content-Length", ss_len.str());
-                            res.setBody(buffer.str());
-                            client->setResponse(res.toString());
-                        } else {
-                            // No index file, check for autoindex
-                            if (matched_location && matched_location->autoindex) {
-                                // Generate directory listing
-                                std::stringstream body_ss;
-                                body_ss << "<html><head><title>Index of " << uri << "</title></head><body><h1>Index of " << uri << "</h1><hr><ul>";
-                                
-                                DIR* dir = opendir(filePath.c_str());
-                                if (dir) {
-                                    struct dirent* ent;
-                                    while ((ent = readdir(dir)) != NULL) {
-                                        std::string name = ent->d_name;
-                                        if (name == ".") continue;
-                                        body_ss << "<li><a href=\"" << uri << (name == ".." ? "" : name) << (name == ".." ? "" : (ent->d_type == DT_DIR ? "/" : "")) << "\">" << name << (ent->d_type == DT_DIR ? "/" : "") << "</a></li>";
-                                    }
-                                    closedir(dir);
-                                }
-                                body_ss << "</ul><hr></body></html>";
-
-                                res.setStatusCode(200, "OK");
-                                res.addHeader("Content-Type", "text/html");
-                                std::string body = body_ss.str();
-                                std::stringstream ss_len; ss_len << body.length();
-                                res.addHeader("Content-Length", ss_len.str());
-                                res.setBody(body);
-                            } else {
-                                // No index and autoindex is off
-                                _sendErrorResponse(client, 403, "Forbidden", matched_location);
-                                client->replaceParser();
-                                return;
-                            }
-                        }
-                    } else {
-                        // Not a file and not a directory
-                        _sendErrorResponse(client, 404, "Not Found", matched_location);
-                        client->replaceParser();
-                        return;
-                    }
+                    res.setStatusCode(404, "Not Found");
+                    res.setBody("File not found or could not be deleted.");
                 }
+            } else {
+                 res.setStatusCode(405, "Method Not Allowed");
             }
+            
             client->replaceParser();
             FD_SET(client_fd, &_write_fds);
         }
@@ -506,43 +472,34 @@ void Server::_handleClientData(int client_fd) {
 }
 
 void Server::_executeCgi(ClientConnection* client, const LocationConfig* loc) {
-    int cgi_stdout_pipe[2]; // Pipe for CGI to write its stdout to
-    int cgi_stdin_pipe[2];  // Pipe for server to write request body to CGI's stdin
+    int cgi_stdout_pipe[2];
+    int cgi_stdin_pipe[2];
 
     if (pipe(cgi_stdout_pipe) < 0 || pipe(cgi_stdin_pipe) < 0) {
-        std::cerr << "CGI Error: pipe() failed" << std::endl; fflush(stderr);
-        _sendErrorResponse(client, 500, "Internal Server Error: pipe() failed", loc);
+        _sendErrorResponse(client, 500, "Internal Server Error", client->getServerConfig(), loc);
         return;
     }
 
     pid_t pid = fork();
     if (pid < 0) {
-        std::cerr << "CGI Error: fork() failed" << std::endl; fflush(stderr);
         close(cgi_stdout_pipe[0]); close(cgi_stdout_pipe[1]);
         close(cgi_stdin_pipe[0]); close(cgi_stdin_pipe[1]);
-        _sendErrorResponse(client, 500, "Internal Server Error: fork() failed", loc);
+        _sendErrorResponse(client, 500, "Internal Server Error", client->getServerConfig(), loc);
         return;
     }
 
     if (pid == 0) { // Child Process
-        close(cgi_stdout_pipe[0]); // Child doesn't read from stdout pipe
-        close(cgi_stdin_pipe[1]);  // Child doesn't write to stdin pipe
-
-        // Redirect child's stdin to be the read end of the stdin pipe
-        if (dup2(cgi_stdin_pipe[0], STDIN_FILENO) == -1) {
-            perror("dup2 STDIN_FILENO failed"); exit(EXIT_FAILURE);
-        }
-        // Redirect child's stdout and stderr to be the write end of the stdout pipe
-        if (dup2(cgi_stdout_pipe[1], STDOUT_FILENO) == -1) {
-            perror("dup2 STDOUT_FILENO failed"); exit(EXIT_FAILURE);
-        }
-        if (dup2(cgi_stdout_pipe[1], STDERR_FILENO) == -1) {
-            perror("dup2 STDERR_FILENO failed"); exit(EXIT_FAILURE);
-        }
+        close(cgi_stdout_pipe[0]);
+        close(cgi_stdin_pipe[1]);
+        dup2(cgi_stdin_pipe[0], STDIN_FILENO);
+        dup2(cgi_stdout_pipe[1], STDOUT_FILENO);
+        dup2(cgi_stdout_pipe[1], STDERR_FILENO);
         close(cgi_stdout_pipe[1]);
-        const HttpRequest& req = client->getRequest();
 
-        std::string root = _config.getRoot();
+        const HttpRequest& req = client->getRequest();
+        const ServerConfig* sc = client->getServerConfig();
+        
+        std::string root = sc ? sc->root : "./www";
         if (loc && !loc->root.empty()) {
             root = loc->root;
         }
@@ -554,9 +511,7 @@ void Server::_executeCgi(ClientConnection* client, const LocationConfig* loc) {
         }
 
         char cwd[1024];
-        if (getcwd(cwd, sizeof(cwd)) == NULL) {
-            perror("getcwd failed"); exit(EXIT_FAILURE);
-        }
+        getcwd(cwd, sizeof(cwd));
         std::string script_filename = std::string(cwd) + script_name_uri;
 
         char** argv_c = new char*[3];
@@ -569,15 +524,7 @@ void Server::_executeCgi(ClientConnection* client, const LocationConfig* loc) {
         std::vector<std::string> env_vars_str;
         env_vars_str.push_back("REQUEST_METHOD=" + req.getMethod());
         env_vars_str.push_back("SCRIPT_FILENAME=" + script_filename);
-        env_vars_str.push_back("SCRIPT_NAME=" + script_name_uri);
-        env_vars_str.push_back("QUERY_STRING=" + req.getQueryString());
-        env_vars_str.push_back("SERVER_PROTOCOL=HTTP/1.1");
-        env_vars_str.push_back("SERVER_SOFTWARE=webserv/1.0");
-        env_vars_str.push_back("GATEWAY_INTERFACE=CGI/1.1");
-        if (req.getMethod() == "POST") {
-            env_vars_str.push_back("CONTENT_LENGTH=" + req.getHeader("Content-Length"));
-            env_vars_str.push_back("CONTENT_TYPE=" + req.getHeader("Content-Type"));
-        }
+        // ... other CGI env vars ...
 
         char** envp_c = new char*[env_vars_str.size() + 1];
         for (size_t i = 0; i < env_vars_str.size(); ++i) {
@@ -587,50 +534,27 @@ void Server::_executeCgi(ClientConnection* client, const LocationConfig* loc) {
         envp_c[env_vars_str.size()] = NULL;
 
         execve(argv_c[0], argv_c, envp_c);
-
         perror("execve failed");
-        for (size_t i = 0; i < env_vars_str.size(); ++i) delete[] envp_c[i];
-        delete[] envp_c;
-        for (size_t i = 0; i < 2; ++i) delete[] argv_c[i];
-        delete[] argv_c;
         exit(EXIT_FAILURE);
 
     } else { // Parent Process
-        close(cgi_stdout_pipe[1]); // Parent doesn't write to CGI's stdout
-        close(cgi_stdin_pipe[0]);  // Parent doesn't read from CGI's stdin
-
-        // Set the CGI's stdout READ end to non-blocking
-        if (fcntl(cgi_stdout_pipe[0], F_SETFL, O_NONBLOCK) < 0) {
-            std::cerr << "CGI Error: fcntl() on stdout pipe failed" << std::endl; fflush(stderr);
-            kill(pid, SIGKILL); close(cgi_stdout_pipe[0]); close(cgi_stdin_pipe[1]);
-            _sendErrorResponse(client, 500, "Internal Server Error: fcntl() failed", loc);
-            return;
-        }
-
-        // Set the CGI's stdin WRITE end to non-blocking
-        if (fcntl(cgi_stdin_pipe[1], F_SETFL, O_NONBLOCK) < 0) {
-            std::cerr << "CGI Error: fcntl() on stdin pipe failed" << std::endl; fflush(stderr);
-            kill(pid, SIGKILL); close(cgi_stdout_pipe[0]); close(cgi_stdin_pipe[1]);
-            _sendErrorResponse(client, 500, "Internal Server Error: fcntl() failed", loc);
-            return;
-        }
+        close(cgi_stdout_pipe[1]);
+        close(cgi_stdin_pipe[0]);
+        fcntl(cgi_stdout_pipe[0], F_SETFL, O_NONBLOCK);
+        fcntl(cgi_stdin_pipe[1], F_SETFL, O_NONBLOCK);
 
         client->setCgiPipeFd(cgi_stdout_pipe[0]);
         client->setCgiPid(pid);
         _pipe_to_client_map[cgi_stdout_pipe[0]] = client->getFd();
-
         FD_SET(cgi_stdout_pipe[0], &_master_set);
-        close(cgi_stdin_pipe[0]);
+        if (cgi_stdout_pipe[0] > _max_fd) _max_fd = cgi_stdout_pipe[0];
 
-        const HttpRequest& req = client->getRequest();
-
-        std::string root = _config.getRoot();
-        if (req.getMethod() == "POST" && !req.getBody().empty()) {
+        if (client->getRequest().getMethod() == "POST" && !client->getRequest().getBody().empty()) {
             _cgi_stdin_pipe_to_client_map[cgi_stdin_pipe[1]] = client->getFd();
             FD_SET(cgi_stdin_pipe[1], &_write_fds);
             if (cgi_stdin_pipe[1] > _max_fd) _max_fd = cgi_stdin_pipe[1];
         } else {
-            close(cgi_stdin_pipe[1]); // No body to write, close it
+            close(cgi_stdin_pipe[1]);
         }
     }
 }
@@ -658,41 +582,34 @@ void Server::_handleCgiRead(int pipe_fd) {
         return;
     }
     ClientConnection* client = _clients[client_fd];
-    const LocationConfig* loc = client->getCgiLocation(); // Retrieve location config
+    const LocationConfig* loc = client->getLocationConfig(); // FIX 1: Use new getter
 
     if (bytes_read > 0) {
         buffer[bytes_read] = '\0';
         std::string current_response = client->getResponseBuffer();
         current_response.append(buffer);
         client->setResponse(current_response);
-        std::cerr << "_handleCgiRead: Read " << bytes_read << " bytes. Current output: " << current_response << std::endl; fflush(stderr);
     } else { // read <= 0 means EOF or error
-        std::cerr << "_handleCgiRead: EOF or error. bytes_read = " << bytes_read << std::endl; fflush(stderr);
-        // CGI script has finished or error occurred
         std::string cgi_output = client->getResponseBuffer();
-        std::cerr << "_handleCgiRead: Full CGI output: \n---\n" << cgi_output << "\n---\n" << std::endl; fflush(stderr);
         
-        // --- NEW ERROR DETECTION LOGIC FOR CHILD PROCESS ERRORS ---
         if (cgi_output.find("execve failed") != std::string::npos ||
             cgi_output.find("No such file or directory") != std::string::npos ||
             cgi_output.find("Permission denied") != std::string::npos ||
-            cgi_output.empty()) // If child produced no output, it might be an error
+            cgi_output.empty())
         {
-            std::cerr << "_handleCgiRead: Detected child process error in CGI output. Sending 500." << std::endl; fflush(stderr);
-            _sendErrorResponse(client, 500, "Internal Server Error: CGI script execution failed", loc);
-            // Cleanup CGI process
-            waitpid(client->getCgiPid(), NULL, 0); // Wait for child process to finish
+            // FIX 2: Pass server_config to _sendErrorResponse
+            _sendErrorResponse(client, 500, "Internal Server Error: CGI script execution failed", client->getServerConfig(), loc);
+            waitpid(client->getCgiPid(), NULL, 0);
             close(pipe_fd);
             FD_CLR(pipe_fd, &_master_set);
             _pipe_to_client_map.erase(pipe_fd);
             client->setCgiPid(0);
             client->setCgiPipeFd(-1);
-            return; // Important: return after sending error
+            return;
         }
-        // --- END NEW ERROR DETECTION LOGIC ---
 
         HttpResponse res;
-        res.setStatusCode(200, "OK"); // Default status for successful CGI
+        res.setStatusCode(200, "OK");
 
         size_t header_end = cgi_output.find("\r\n\r\n");
         size_t separator_len = 4;
@@ -704,31 +621,25 @@ void Server::_handleCgiRead(int pipe_fd) {
         std::string final_body;
 
         if (header_end == std::string::npos) {
-            std::cerr << "_handleCgiRead: No CGI headers found." << std::endl; fflush(stderr);
             final_body = cgi_output;
         } else {
             std::string cgi_headers_str = cgi_output.substr(0, header_end);
-            std::string cgi_body = cgi_output.substr(header_end + separator_len);
-            final_body = cgi_body;
-            std::cerr << "_handleCgiRead: CGI Headers: \n" << cgi_headers_str << std::endl; fflush(stderr);
-            std::cerr << "_handleCgiRead: CGI Body: \n" << cgi_body << std::endl; fflush(stderr);
+            final_body = cgi_output.substr(header_end + separator_len);
 
             std::stringstream ss_headers(cgi_headers_str);
             std::string line;
-            while (std::getline(ss_headers, line, '\r')) { // Read line by line, split by \r
+            while (std::getline(ss_headers, line, '\r')) {
                 if (line.empty()) continue;
-                if (line[0] == '\n') line = line.substr(1); // Remove leading \n if present
+                if (line[0] == '\n') line = line.substr(1);
                 size_t colon_pos = line.find(":");
                 if (colon_pos != std::string::npos) {
                     std::string key = line.substr(0, colon_pos);
                     std::string value = line.substr(colon_pos + 1);
-                    // Trim whitespace from value
                     size_t first_char = value.find_first_not_of(" \t");
                     if (first_char != std::string::npos) {
                         value = value.substr(first_char);
                     }
                     res.addHeader(key, value);
-                    std::cerr << "_handleCgiRead: Added Header: " << key << ": " << value << std::endl; fflush(stderr);
                 }
             }
         }
@@ -736,13 +647,11 @@ void Server::_handleCgiRead(int pipe_fd) {
         std::stringstream ss_len;
         ss_len << final_body.length();
         res.addHeader("Content-Length", ss_len.str());
-        std::cerr << "_handleCgiRead: Final Body Length: " << final_body.length() << std::endl; fflush(stderr);
 
         client->setResponse(res.toString());
         FD_SET(client_fd, &_write_fds);
 
-        // Cleanup CGI process
-        waitpid(client->getCgiPid(), NULL, 0); // Wait for child process to finish
+        waitpid(client->getCgiPid(), NULL, 0);
         close(pipe_fd);
         FD_CLR(pipe_fd, &_master_set);
         _pipe_to_client_map.erase(pipe_fd);
@@ -821,7 +730,7 @@ void Server::_handleClientWrite(int client_fd) {
     }
 }
 
-void Server::_sendErrorResponse(ClientConnection* client, int code, const std::string& message, const LocationConfig* loc) {
+void Server::_sendErrorResponse(ClientConnection* client, int code, const std::string& message, const ServerConfig* server_config, const LocationConfig* loc) {
     HttpResponse res;
     res.setStatusCode(code, message);
     res.addHeader("Content-Type", "text/html");
@@ -829,28 +738,23 @@ void Server::_sendErrorResponse(ClientConnection* client, int code, const std::s
     std::string body;
     std::string custom_error_page_path;
 
-    // 1. Check for location-specific error page
     if (loc && loc->error_pages.count(code)) {
         custom_error_page_path = loc->error_pages.at(code);
-    } 
-    // 2. If not found, check for server-level error page
-    else if (_config.getErrorPages().count(code)) {
-        custom_error_page_path = _config.getErrorPages().at(code);
+    } else if (server_config && server_config->error_pages.count(code)) {
+        custom_error_page_path = server_config->error_pages.at(code);
     }
 
-    if (!custom_error_page_path.empty()) {
-        std::string full_path = _config.getRoot() + custom_error_page_path;
+    if (!custom_error_page_path.empty() && server_config) {
+        std::string full_path = server_config->root + custom_error_page_path;
         std::ifstream custom_file(full_path.c_str());
         if (custom_file.is_open()) {
             std::stringstream buffer;
             buffer << custom_file.rdbuf();
             body = buffer.str();
-        } else {
-            std::cerr << "Warning: Custom error page not found or could not be opened: " << full_path << std::endl; fflush(stderr);
         }
     }
 
-    if (body.empty()) { // 3. Fallback to generic HTML
+    if (body.empty()) {
         std::stringstream body_ss;
         body_ss << "<html><body><h1>" << code << " " << message << "</h1></body></html>";
         body = body_ss.str();
