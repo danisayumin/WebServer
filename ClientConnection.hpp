@@ -3,6 +3,7 @@
 
 #include "HttpRequest.hpp"
 #include "HttpResponse.hpp"
+#include <sys/types.h> // For pid_t and ssize_t on Linux
 
 class HttpRequestParser; // Forward declaration
 struct LocationConfig;    // Forward declaration for LocationConfig (changed to struct)

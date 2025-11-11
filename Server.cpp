@@ -407,7 +407,7 @@ void Server::_handleClientData(int client_fd) {
                         std::ifstream html_file(html_filePath.c_str());
                         if (html_file.is_open()) {
                             filePath = html_filePath; // Update filePath to the .html version
-                            file.swap(html_file); // Use the opened .html file
+                            file.close(); // Use the opened .html file
                             file_found = true;
                         }
                     }

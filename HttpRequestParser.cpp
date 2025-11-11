@@ -1,6 +1,8 @@
 #include "HttpRequestParser.hpp"
 #include <sstream>
 #include <iostream> // For debug
+#include <cstdlib> // For strtol
+#include <cstdio> // For strerr
 
 HttpRequestParser::HttpRequestParser() :
     _state(PARSING_REQUEST_LINE),
