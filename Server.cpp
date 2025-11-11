@@ -239,7 +239,105 @@ void Server::_handleClientData(int client_fd) {
                 return;
             }
 
+            // Handle /api/uploads GET endpoint - list files with modification times
+            if (req.getUri() == "/api/uploads" && req.getMethod() == "GET") {
+                std::string uploads_dir = "./www/uploads";
+                DIR* dir = opendir(uploads_dir.c_str());
+                
+                if (!dir) {
+                    res.setStatusCode(500, "Internal Server Error");
+                    res.addHeader("Content-Type", "application/json");
+                    std::string body = "{\"error\": \"Unable to open uploads directory\"}";
+                    std::stringstream ss_len; ss_len << body.length();
+                    res.addHeader("Content-Length", ss_len.str());
+                    res.setBody(body);
+                    client->setResponse(res.toString());
+                    FD_SET(client_fd, &_write_fds);
+                    client->replaceParser();
+                    return;
+                }
+
+                // Build JSON response with files
+                std::stringstream json_body;
+                json_body << "{\"files\": [";
+                bool first = true;
+
+                struct dirent* ent;
+                while ((ent = readdir(dir)) != NULL) {
+                    // Skip directories and hidden files
+                    if (ent->d_type != DT_REG || ent->d_name[0] == '.') {
+                        continue;
+                    }
+
+                    // Get file modification time
+                    std::string full_path = uploads_dir + "/" + ent->d_name;
+                    struct stat file_stat;
+                    if (stat(full_path.c_str(), &file_stat) != 0) {
+                        continue; // Skip files we can't stat
+                    }
+
+                    // Add JSON object for this file
+                    if (!first) json_body << ",";
+                    first = false;
+
+                    // Convert modification time to milliseconds
+                    long long modified_ms = (long long)file_stat.st_mtime * 1000;
+                    json_body << "{\"name\": \"" << ent->d_name << "\", \"modified\": " << modified_ms << "}";
+                }
+
+                closedir(dir);
+                json_body << "]}";
+
+                res.setStatusCode(200, "OK");
+                res.addHeader("Content-Type", "application/json");
+                std::string body = json_body.str();
+                std::stringstream ss_len; ss_len << body.length();
+                res.addHeader("Content-Length", ss_len.str());
+                res.setBody(body);
+                client->setResponse(res.toString());
+                FD_SET(client_fd, &_write_fds);
+                client->replaceParser();
+                return;
+            }
+
             if (req.getMethod() == "DELETE") {
+                // Handle DELETE /uploads/{filename}
+                if (req.getUri().find("/uploads/") == 0) {
+                    std::string uploads_dir = "./www/uploads";
+                    // Extract filename from URI: /uploads/{filename}
+                    std::string filename = req.getUri().substr(9); // strlen("/uploads/") == 9
+                    
+                    // Security: prevent directory traversal
+                    if (filename.find("..") != std::string::npos || filename.find("/") != std::string::npos) {
+                        res.setStatusCode(400, "Bad Request");
+                        client->setResponse(res.toString());
+                        FD_SET(client_fd, &_write_fds);
+                        client->replaceParser();
+                        return;
+                    }
+
+                    std::string filePath = uploads_dir + "/" + filename;
+
+                    if (access(filePath.c_str(), F_OK) == 0) {
+                        if (std::remove(filePath.c_str()) == 0) {
+                            res.setStatusCode(204, "No Content");
+                        } else {
+                            if (errno == EACCES) {
+                                res.setStatusCode(403, "Forbidden");
+                            } else {
+                                res.setStatusCode(500, "Internal Server Error");
+                            }
+                        }
+                    } else {
+                        res.setStatusCode(404, "Not Found");
+                    }
+                    client->setResponse(res.toString());
+                    FD_SET(client_fd, &_write_fds);
+                    client->replaceParser();
+                    return;
+                }
+
+                // Original DELETE handler for other paths
                 std::string root = _config.getRoot();
                 if (matched_location && !matched_location->root.empty()) {
                     root = matched_location->root;

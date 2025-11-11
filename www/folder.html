@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>File Uploads - webserv</title>
+    <link rel="stylesheet" href="style.css">
+    <style>
+        .files-container {
+            background: linear-gradient(135deg, var(--deep-purple) 0%, rgba(45, 0, 82, 0.8) 100%);
+            border: 2px solid var(--neon-purple);
+            border-right: 2px solid var(--neon-green);
+            border-bottom: 2px solid var(--neon-green);
+            border-radius: 20px;
+            padding: 40px;
+            box-shadow: 0 0 30px var(--neon-purple), inset 0 0 20px rgba(179, 0, 255, 0.1);
+            max-width: 900px;
+            margin: 30px auto;
+        }
+
+        .files-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+
+        .files-table thead {
+            background-color: rgba(179, 0, 255, 0.2);
+            border-bottom: 2px solid var(--neon-green);
+        }
+
+        .files-table th {
+            color: var(--neon-green);
+            text-shadow: 0 0 5px var(--neon-green);
+            padding: 15px;
+            text-align: left;
+            font-weight: bold;
+            letter-spacing: 1px;
+        }
+
+        .files-table tbody tr {
+            border-bottom: 1px solid rgba(179, 0, 255, 0.3);
+            transition: all 0.3s ease;
+        }
+
+        .files-table tbody tr:hover {
+            background-color: rgba(179, 0, 255, 0.1);
+            box-shadow: inset 0 0 15px rgba(57, 255, 20, 0.1);
+        }
+
+        .files-table td {
+            color: var(--light-gray);
+            padding: 15px;
+            font-family: 'Courier New', monospace;
+        }
+
+        .file-name {
+            color: var(--neon-green);
+            text-shadow: 0 0 5px var(--neon-green);
+            word-break: break-all;
+            max-width: 400px;
+        }
+
+        .delete-btn {
+            background-color: var(--dark-green);
+            border: 2px solid var(--neon-green);
+            color: var(--neon-green);
+            padding: 8px 16px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: bold;
+            text-transform: uppercase;
+            font-size: 0.9rem;
+            box-shadow: 0 0 10px var(--neon-green);
+            transition: all 0.3s ease;
+            letter-spacing: 1px;
+        }
+
+        .delete-btn:hover {
+            background-color: var(--neon-green);
+            color: var(--black);
+            box-shadow: 0 0 20px var(--neon-green), 0 0 40px var(--neon-purple);
+            border-color: var(--neon-purple);
+            transform: scale(1.05);
+        }
+
+        .delete-btn:active {
+            transform: scale(0.95);
+        }
+
+        .delete-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 40px 20px;
+            color: var(--light-gray);
+        }
+
+        .empty-state p {
+            color: var(--neon-green);
+            text-shadow: 0 0 5px var(--neon-green);
+            font-size: 1.2rem;
+            margin: 20px 0;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 20px;
+            color: var(--neon-green);
+            text-shadow: 0 0 5px var(--neon-green);
+        }
+
+        .refresh-btn {
+            background-color: var(--neon-purple);
+            border: 2px solid var(--neon-purple);
+            color: var(--neon-green);
+            padding: 10px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: bold;
+            text-transform: uppercase;
+            font-size: 0.9rem;
+            box-shadow: 0 0 10px var(--neon-purple);
+            transition: all 0.3s ease;
+            letter-spacing: 1px;
+            margin-bottom: 20px;
+        }
+
+        .refresh-btn:hover {
+            background-color: var(--neon-purple);
+            box-shadow: 0 0 20px var(--neon-purple), 0 0 40px var(--neon-green);
+            transform: scale(1.05);
+        }
+
+        .refresh-btn:active {
+            transform: scale(0.95);
+        }
+    </style>
+</head>
+<body>
+    <nav>
+        <ul>
+            <li><a href="/">Home</a></li>
+            <li><a href="/upload.html">Upload</a></li>
+            <li><a href="/folder.html">Files</a></li>
+            <li><a href="/secret/secret.html">Secret</a></li>
+        </ul>
+    </nav>
+
+    <div class="container">
+        <h1>📁 Uploaded Files</h1>
+        <p>View and manage your uploaded files in real-time</p>
+    </div>
+
+    <div class="files-container">
+        <h2 style="color: var(--neon-purple); text-shadow: 0 0 10px var(--neon-purple), 0 0 20px var(--neon-green); margin-top: 0;">File Browser</h2>
+        
+        <button class="refresh-btn" id="refreshBtn" onclick="loadFiles()">🔄 Refresh</button>
+        
+        <div id="loadingState" class="loading" style="display: none;">Loading files...</div>
+
+        <table class="files-table" id="filesTable" style="display: none;">
+            <thead>
+                <tr>
+                    <th>Filename</th>
+                    <th>Upload Date</th>
+                    <th>Action</th>
+                </tr>
+            </thead>
+            <tbody id="filesTableBody">
+                <!-- Files will be loaded dynamically here -->
+            </tbody>
+        </table>
+
+        <div class="empty-state" id="emptyState" style="display: none;">
+            <p>⚠️ No files uploaded yet</p>
+            <p><a href="/upload.html" style="color: var(--neon-green);">Upload your first file</a></p>
+        </div>
+    </div>
+
+    <script>
+        async function loadFiles() {
+            const loadingState = document.getElementById('loadingState');
+            const filesTable = document.getElementById('filesTable');
+            const emptyState = document.getElementById('emptyState');
+            const filesTableBody = document.getElementById('filesTableBody');
+            const refreshBtn = document.getElementById('refreshBtn');
+
+            loadingState.style.display = 'block';
+            filesTable.style.display = 'none';
+            emptyState.style.display = 'none';
+            refreshBtn.disabled = true;
+
+            try {
+                // Fetch the directory listing - this requires your server to support it
+                // Or you can use a JSON API endpoint if your server provides one
+                const response = await fetch('/api/uploads', {
+                    method: 'GET',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+
+                if (!response.ok) {
+                    throw new Error('Failed to load files');
+                }
+
+                const data = await response.json();
+                const files = data.files || [];
+
+                if (files.length === 0) {
+                    loadingState.style.display = 'none';
+                    emptyState.style.display = 'block';
+                } else {
+                    filesTableBody.innerHTML = '';
+                    
+                    files.forEach(file => {
+                        const row = document.createElement('tr');
+                        const fileDate = new Date(file.modified).toLocaleDateString('en-GB', {
+                            day: '2-digit',
+                            month: '2-digit',
+                            year: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit'
+                        }).replace(',', '');
+
+                        row.innerHTML = `
+                            <td class="file-name">${file.name}</td>
+                            <td>${fileDate}</td>
+                            <td>
+                                <button class="delete-btn" onclick="deleteFile('${file.name}', this)">Delete</button>
+                            </td>
+                        `;
+                        filesTableBody.appendChild(row);
+                    });
+
+                    loadingState.style.display = 'none';
+                    filesTable.style.display = 'table';
+                }
+            } catch (error) {
+                console.error('Error loading files:', error);
+                loadingState.innerHTML = '<p style="color: var(--neon-green);">❌ Error loading files. Make sure your server supports /api/uploads endpoint.</p>';
+            } finally {
+                refreshBtn.disabled = false;
+            }
+        }
+
+        async function deleteFile(filename, buttonElement) {
+            if (!confirm(`Are you sure you want to delete "${filename}"?`)) {
+                return;
+            }
+
+            buttonElement.disabled = true;
+            buttonElement.innerHTML = '🗑️ Deleting...';
+
+            try {
+                const response = await fetch(`/uploads/${filename}`, {
+                    method: 'DELETE'
+                });
+
+                if (response.ok) {
+                    // Reload files after successful deletion
+                    await loadFiles();
+                } else {
+                    alert('Failed to delete file');
+                    buttonElement.disabled = false;
+                    buttonElement.innerHTML = 'Delete';
+                }
+            } catch (error) {
+                console.error('Error deleting file:', error);
+                alert('Error deleting file');
+                buttonElement.disabled = false;
+                buttonElement.innerHTML = 'Delete';
+            }
+        }
+
+        // Load files when page loads
+        window.addEventListener('load', loadFiles);
+    </script>
+</body>
+</html>
