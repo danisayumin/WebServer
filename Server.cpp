@@ -163,14 +163,12 @@ void Server::_acceptNewConnection(int listening_fd) {
 }
 
 void Server::_handleClientData(int client_fd) {
-    std::cerr << "DEBUG: Entering _handleClientData for client " << client_fd << std::endl; fflush(stderr);
     if (_clients.find(client_fd) == _clients.end()) return;
     ClientConnection* client = _clients[client_fd];
 
     if (client->readRequest() > 0) {
         // Find the corresponding location to check client_max_body_size
         const HttpRequest& temp_req = client->getRequest();
-        std::cerr << "DEBUG: Client " << client_fd << " requested URI: " << temp_req.getUri() << std::endl; fflush(stderr);
         const std::vector<LocationConfig*>& locations = _config.getLocations();
         const LocationConfig* matched_location = NULL;
         std::string longest_match = "";
@@ -361,7 +359,6 @@ void Server::_handleClientData(int client_fd) {
                 // Uploads are now handled by checking if a location has an upload_path
                 if (matched_location && !matched_location->upload_path.empty()) {
                     std::string content_type = req.getHeader("Content-Type");
-                    std::cerr << "DEBUG: Client " << client_fd << " Received Content-Type: '" << content_type << "'" << std::endl; fflush(stderr);
                     if (content_type.find("multipart/form-data") != std::string::npos) {
                         const std::vector<HttpRequest::UploadedFile>& uploadedFiles = req.getUploadedFiles();
                         if (uploadedFiles.empty()) {
@@ -374,12 +371,10 @@ void Server::_handleClientData(int client_fd) {
                             if (upload_dir[upload_dir.length() - 1] != '/') {
                                 upload_dir += "/";
                             }
-                            std::cerr << "DEBUG: Client " << client_fd << " Resolved upload directory: " << upload_dir << std::endl; fflush(stderr);
 
                             // Check if directory exists and is writable
                             struct stat dir_stat;
                             if (stat(upload_dir.c_str(), &dir_stat) != 0) {
-                                std::cerr << "DEBUG: Client " << client_fd << " Upload directory does not exist: " << upload_dir << " Error: " << strerror(errno) << std::endl; fflush(stderr);
                                 all_saved = false;
                                 res.setStatusCode(500, "Internal Server Error");
                                 std::string body = "Upload directory does not exist or is inaccessible.";
@@ -392,7 +387,6 @@ void Server::_handleClientData(int client_fd) {
                                 return;
                             }
                             if (!S_ISDIR(dir_stat.st_mode)) {
-                                std::cerr << "DEBUG: Client " << client_fd << " Upload path is not a directory: " << upload_dir << std::endl; fflush(stderr);
                                 all_saved = false;
                                 res.setStatusCode(500, "Internal Server Error");
                                 std::string body = "Upload path is not a directory.";
@@ -405,7 +399,6 @@ void Server::_handleClientData(int client_fd) {
                                 return;
                             }
                             if (access(upload_dir.c_str(), W_OK) != 0) {
-                                std::cerr << "DEBUG: Client " << client_fd << " Upload directory not writable: " << upload_dir << " Error: " << strerror(errno) << std::endl; fflush(stderr);
                                 all_saved = false;
                                 res.setStatusCode(403, "Forbidden");
                                 std::string body = "Upload directory is not writable.";
@@ -417,7 +410,6 @@ void Server::_handleClientData(int client_fd) {
                                 client->replaceParser();
                                 return;
                             }
-                            std::cerr << "DEBUG: Client " << client_fd << " Upload directory is valid and writable." << std::endl; fflush(stderr);
 
                             for (size_t i = 0; i < uploadedFiles.size(); ++i) {
                                 const HttpRequest::UploadedFile& file = uploadedFiles[i];
@@ -433,15 +425,12 @@ void Server::_handleClientData(int client_fd) {
                                     safe_filename += file.filename;
                                 }
 
-                                std::cerr << "DEBUG: Client " << client_fd << " Attempting to save file to: " << safe_filename << std::endl; fflush(stderr);
                                 std::ofstream outfile(safe_filename.c_str(), std::ios::binary);
                                 if (outfile.is_open()) {
-                                    std::cerr << "DEBUG: Client " << client_fd << " File stream opened successfully for: " << safe_filename << std::endl; fflush(stderr);
                                     outfile.write(file.content.c_str(), file.content.length());
                                     outfile.close();
                                     std::cout << "Uploaded file saved to: " << safe_filename << std::endl;
                                 } else {
-                                    std::cerr << "DEBUG: Client " << client_fd << " Failed to open file stream for: " << safe_filename << " Error: " << strerror(errno) << std::endl; fflush(stderr);
                                     all_saved = false;
                                     break;
                                 }
@@ -486,8 +475,7 @@ void Server::_handleClientData(int client_fd) {
                 }
                 
                                 std::string filePath = root + uri;
-                                std::cerr << "DEBUG: Client " << client_fd << " attempting to serve file: " << filePath << std::endl; fflush(stderr);
-                                                std::ifstream file(filePath.c_str());
+                                std::ifstream file(filePath.c_str());
                 bool file_found = file.is_open();
 
                 if (!file_found) {
@@ -496,7 +484,6 @@ void Server::_handleClientData(int client_fd) {
                     // Check if there's no dot, or if the dot is part of a directory name (e.g., /path.to/file)
                     if (dot_pos == std::string::npos || dot_pos < uri.rfind('/')) {
                         std::string html_filePath = filePath + ".html";
-                        std::cerr << "DEBUG: Client " << client_fd << " attempting to serve file with .html extension: " << html_filePath << std::endl; fflush(stderr);
                         std::ifstream html_file(html_filePath.c_str());
                         if (html_file.is_open()) {
                             filePath = html_filePath; // Update filePath to the .html version
@@ -890,23 +877,18 @@ void Server::_handleClientWrite(int client_fd) {
     const std::string& response = client->getResponseBuffer();
 
     if (response.empty()) {
-        std::cerr << "DEBUG: Client " << client_fd << " _handleClientWrite: Response buffer is empty." << std::endl; fflush(stderr);
         FD_CLR(client_fd, &_write_fds); return;
     }
 
-    std::cerr << "DEBUG: Client " << client_fd << " _handleClientWrite: Attempting to send " << response.length() << " bytes." << std::endl; fflush(stderr);
     ssize_t bytes_sent = send(client_fd, response.c_str(), response.length(), 0);
 
     if (bytes_sent < 0) {
-        std::cerr << "DEBUG: Client " << client_fd << " _handleClientWrite: send() failed with error: " << strerror(errno) << std::endl; fflush(stderr);
         close(client_fd); FD_CLR(client_fd, &_master_set); FD_CLR(client_fd, &_write_fds); delete _clients[client_fd]; _clients.erase(client_fd); return;
     }
 
     if (static_cast<size_t>(bytes_sent) < response.length()) {
-        std::cerr << "DEBUG: Client " << client_fd << " _handleClientWrite: Sent " << bytes_sent << " bytes, " << (response.length() - bytes_sent) << " remaining." << std::endl; fflush(stderr);
         client->setResponse(response.substr(bytes_sent));
     } else {
-        std::cerr << "DEBUG: Client " << client_fd << " _handleClientWrite: All " << bytes_sent << " bytes sent successfully." << std::endl; fflush(stderr);
         client->clearResponseBuffer();
         FD_CLR(client_fd, &_write_fds);
         // Do NOT close the client_fd here. Keep it open for subsequent requests.
@@ -925,32 +907,23 @@ void Server::_sendErrorResponse(ClientConnection* client, int code, const std::s
     // 1. Check for location-specific error page
     if (loc && loc->error_pages.count(code)) {
         custom_error_page_path = loc->error_pages.at(code);
-        std::cerr << "DEBUG: Found location-specific error page for code " << code << ": " << custom_error_page_path << std::endl; fflush(stderr);
     } 
     // 2. If not found, check for server-level error page
     else if (_config.getErrorPages().count(code)) {
         custom_error_page_path = _config.getErrorPages().at(code);
-        std::cerr << "DEBUG: Found server-level error page for code " << code << ": " << custom_error_page_path << std::endl; fflush(stderr);
     }
 
     if (!custom_error_page_path.empty()) {
         std::string full_path = _config.getRoot() + custom_error_page_path;
-        std::cerr << "DEBUG: Attempting to open custom error page at: " << full_path << std::endl; fflush(stderr);
         std::ifstream custom_file(full_path.c_str());
         if (custom_file.is_open()) {
-            std::cerr << "DEBUG: Custom error page file opened successfully!" << std::endl; fflush(stderr);
             std::stringstream buffer;
             buffer << custom_file.rdbuf();
             body = buffer.str();
-        } else {
-            std::cerr << "Warning: Custom error page not found or could not be opened: " << full_path << std::endl; fflush(stderr);
         }
-    } else {
-        std::cerr << "DEBUG: No custom error page found for code " << code << std::endl; fflush(stderr);
     }
 
     if (body.empty()) { // 3. Fallback to generic HTML
-        std::cerr << "DEBUG: Using fallback generic error page for code " << code << std::endl; fflush(stderr);
         std::stringstream body_ss;
         body_ss << "<html><body><h1>" << code << " " << message << "</h1></body></html>";
         body = body_ss.str();
