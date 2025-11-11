@@ -1,24 +1,30 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Welcome to webserv!</title>
-    <link rel="stylesheet" href="style.css">
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<title>Welcome to webserv!</title>
+	<link rel="stylesheet" href="style.css">
 </head>
+
 <body>
-    <nav>
-        <ul>
-            <li><a href="/">Home</a></li>
-            <li><a href="/upload.html">Upload</a></li>
-            <li><a href="/folder.html">Files</a></li>
-            <li><a href="/secret/secret.html">Secret</a></li>
-        </ul>
-    </nav>
-    <div class="container">
-        <h1>Hello from our C++ webserv!</h1>
-        <p>This page is being served by a custom HTTP server written in C++98.</p>
-        <p>Explore the site using the navigation above!</p>
-    </div>
+	<nav>
+		<ul>
+			<li><a href="/">Home</a></li>
+			<li><a href="/upload.html">Upload</a></li>
+			<li><a href="/folder.html">Files</a></li>
+			<li><a href="/secret/secret.html">Secret</a></li>
+		</ul>
+	</nav>
+	<div class="container">
+		<h1>Hello from our C++ webserv!</h1>
+		<form method="POST" action="/">
+			<button type="submit">Test 405 Error</button>
+		</form>
+		<p>This page is being served by a custom HTTP server written in C++98.</p>
+		<p>Explore the site using the navigation above!</p>
+	</div>
 </body>
+
 </html>

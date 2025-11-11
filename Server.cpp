@@ -447,11 +447,9 @@ void Server::_handleClientData(int client_fd) {
                                 }
                             }
                             if (all_saved) {
-                                res.setStatusCode(200, "OK");
-                                std::string body = "File(s) uploaded successfully!";
-                                res.setBody(body);
-                                std::stringstream ss_len; ss_len << body.length();
-                                res.addHeader("Content-Length", ss_len.str());
+                                res.setStatusCode(302, "Found");
+                                res.addHeader("Location", "/uploaded.html");
+                                res.addHeader("Content-Length", "0");
                             } else {
                                 res.setStatusCode(500, "Internal Server Error");
                                 std::string body = "Failed to save some files.";
@@ -468,13 +466,10 @@ void Server::_handleClientData(int client_fd) {
                         res.addHeader("Content-Length", ss_len.str());
                     }
                     client->setResponse(res.toString()); // ADDED THIS LINE
-                } else { // Other POST requests
-                    res.setStatusCode(405, "Method Not Allowed");
-                    std::string body = "Method Not Allowed for this resource.";
-                    res.setBody(body);
-                    std::stringstream ss_len; ss_len << body.length();
-                    res.addHeader("Content-Length", ss_len.str());
-                    client->setResponse(res.toString()); // ADDED THIS LINE
+                } else { // Other POST requests - return 405
+                    _sendErrorResponse(client, 405, "Method Not Allowed", matched_location);
+                    client->replaceParser();
+                    return;
                 }
             } else { // GET method
                 std::string root = _config.getRoot();
@@ -930,25 +925,32 @@ void Server::_sendErrorResponse(ClientConnection* client, int code, const std::s
     // 1. Check for location-specific error page
     if (loc && loc->error_pages.count(code)) {
         custom_error_page_path = loc->error_pages.at(code);
+        std::cerr << "DEBUG: Found location-specific error page for code " << code << ": " << custom_error_page_path << std::endl; fflush(stderr);
     } 
     // 2. If not found, check for server-level error page
     else if (_config.getErrorPages().count(code)) {
         custom_error_page_path = _config.getErrorPages().at(code);
+        std::cerr << "DEBUG: Found server-level error page for code " << code << ": " << custom_error_page_path << std::endl; fflush(stderr);
     }
 
     if (!custom_error_page_path.empty()) {
         std::string full_path = _config.getRoot() + custom_error_page_path;
+        std::cerr << "DEBUG: Attempting to open custom error page at: " << full_path << std::endl; fflush(stderr);
         std::ifstream custom_file(full_path.c_str());
         if (custom_file.is_open()) {
+            std::cerr << "DEBUG: Custom error page file opened successfully!" << std::endl; fflush(stderr);
             std::stringstream buffer;
             buffer << custom_file.rdbuf();
             body = buffer.str();
         } else {
             std::cerr << "Warning: Custom error page not found or could not be opened: " << full_path << std::endl; fflush(stderr);
         }
+    } else {
+        std::cerr << "DEBUG: No custom error page found for code " << code << std::endl; fflush(stderr);
     }
 
     if (body.empty()) { // 3. Fallback to generic HTML
+        std::cerr << "DEBUG: Using fallback generic error page for code " << code << std::endl; fflush(stderr);
         std::stringstream body_ss;
         body_ss << "<html><body><h1>" << code << " " << message << "</h1></body></html>";
         body = body_ss.str();
