@@ -12,19 +12,36 @@ O servidor está funcional e é capaz de servir um site estático simples. Ele c
 
 ## Funcionalidades Implementadas
 
-- [x] **Build System**: Compilação automatizada com `make`.
-- [x] **Parsing de Configuração**: O servidor lê um arquivo de configuração para definir porta e diretório raiz.
-- [x] **Arquitetura Não-Bloqueante**: Loop de eventos principal com `select()` para I/O multiplexada.
-- [x] **Gerenciamento de Conexão**: Aceita e gerencia o ciclo de vida de conexões de clientes.
+- [x] **Build System**: Compilação automatizada com `make` (`-Wall -Wextra -Werror -std=c++98`).
+- [x] **Arquitetura Não-Bloqueante**: Loop de eventos principal com `select()` para I/O multiplexada (única chamada para leitura e escrita).
+- [x] **Gerenciamento de Conexão**: Aceita e gerencia o ciclo de vida de conexões de clientes, com verificação rigorosa de erros de I/O e remoção de clientes.
 - [x] **Parsing de Requisição HTTP**: Analisa requisições para extrair método, URI, cabeçalhos e corpo.
-- [x] **Método GET**: Serve arquivos estáticos (HTML, CSS, etc.).
-- [x] **Método POST**:
-    - Suporte a upload de arquivos (`multipart/form-data`).
-    - Execução de scripts CGI passando o corpo da requisição.
-- [x] **Método DELETE**: Remove recursos (arquivos) do servidor.
-- [x] **CGI (Common Gateway Interface)**: Executa scripts (Python) para gerar conteúdo dinâmico para requisições GET e POST.
-- [x] **Suporte a MIME Types**: Identifica e envia o `Content-Type` correto.
-- [x] **Geração de Respostas de Erro**: Gera respostas para `403`, `404`, `405`, `500`, etc.
+- [x] **Métodos HTTP Suportados**:
+    - [x] **GET**: Serve arquivos estáticos (HTML, CSS, JS, imagens).
+    - [x] **POST**: Suporte a upload de arquivos (`multipart/form-data`) e execução de scripts CGI.
+    - [x] **DELETE**: Remove recursos (arquivos) do servidor.
+- [x] **CGI (Common Gateway Interface)**:
+    - Executa scripts (ex: Python) para gerar conteúdo dinâmico para requisições GET e POST.
+    - Garante execução no diretório correto para acesso a arquivos relativos.
+    - Tratamento robusto de erros em scripts CGI (sem crashar o servidor, com retorno de `500 Internal Server Error` ou `504 Gateway Timeout`).
+- [x] **Configuração Flexível via `webserv.conf`**:
+    - [x] **Múltiplos Servidores**: Suporte a múltiplos blocos `server {}`.
+    - [x] **Múltiplas Portas**: Escuta em portas diferentes.
+    - [x] **Virtual Hosting**: Diferencia servidores pelo `server_name` (cabeçalho `Host`) na mesma porta.
+    - [x] **Diretório Raiz (`root`)**: Define o diretório base para servir arquivos.
+    - [x] **Páginas de Erro Customizadas (`error_page`)**: Define páginas HTML personalizadas para códigos de erro (ex: 404, 500).
+    - [x] **Limite de Corpo da Requisição (`client_max_body_size`)**: Restringe o tamanho máximo do corpo das requisições.
+    - [x] **Rotas Específicas (`location`)**: Mapeia URIs para diferentes configurações (diretórios, métodos permitidos, CGI, upload).
+    - [x] **Arquivo Padrão para Diretórios (`index`)**: Define o arquivo a ser servido quando um diretório é acessado.
+    - [x] **Métodos Permitidos por Rota (`allow_methods`)**: Restringe os métodos HTTP aceitos para uma `location` específica.
+    - [x] **Caminho de Upload (`upload_path`)**: Define o diretório para salvar arquivos enviados via POST.
+- [x] **Suporte a MIME Types**: Identifica e envia o `Content-Type` correto para diversos tipos de arquivo.
+- [x] **Tratamento de Erros HTTP**: Gera respostas com códigos de status apropriados (ex: `200 OK`, `400 Bad Request`, `403 Forbidden`, `404 Not Found`, `405 Method Not Allowed`, `413 Payload Too Large`, `500 Internal Server Error`, `501 Not Implemented`, `504 Gateway Timeout`).
+- [x] **Robustez e Estabilidade**:
+    - [x] Não "crashar" com requisições desconhecidas ou malformadas.
+    - [x] Gerenciamento eficiente de recursos para evitar vazamentos de memória.
+    - [x] Prevenção de conexões penduradas (hanging connections).
+    - [x] Capacidade de operar continuamente sob testes de estresse (`siege`).
 
 ## Conceitos Fundamentais
 
@@ -48,129 +65,18 @@ Para compilar o projeto, use o comando `make` ou `make re` para uma recompilaç�
 make re
 ```
 
-### 2. Arquivo de Configuração (`.config`)
+### 2. Arquivo de Configuração (`webserv.conf`)
 
-O servidor é configurado através de um arquivo. O formato atual é simples e suporta as seguintes diretivas dentro de um bloco `server { ... }`:
-
-- `listen`: A porta em que o servidor vai escutar.
-- `server_name`: O nome do servidor (atualmente não utilizado).
-- `root`: O diretório raiz de onde os arquivos serão servidos.
-- `error_page`: Define uma página customizada para um código de erro (atualmente não utilizado).
-
-**Exemplo de `.config`:**
-```nginx
-server {
-    listen 8080;
-    server_name webserv.com;
-
-    root ./www;
-    index index.html;
-
-    error_page 404 /404.html;
-
-    location / {
-        try_files $uri $uri/ =404;
-    }
-
-    location /upload {
-        client_max_body_size 10M;
-    }
-}
-```
+O servidor é configurado através do arquivo `webserv.conf`. Um exemplo detalhado e funcional é fornecido no repositório. Certifique-se de que ele esteja configurado para as portas e hosts que você deseja testar.
 
 ### 3. Execução
 
 Inicie o servidor passando o arquivo de configuração como argumento.
 
 ```bash
-./webserv .config
+./webserv webserv.conf
 ```
 
 O servidor ficará em execução, aguardando por conexões.
 
-### 4. Testando
 
-**a) Com o Navegador:**
-
-Abra seu navegador e acesse `http://localhost:8080`. Você deverá ver a página de boas-vindas com o estilo CSS aplicado.
-
-**b) Com `curl` (GET bem-sucedido):**
-
-Abra um novo terminal e peça a página inicial. Você receberá o conteúdo do `index.html`.
-```bash
-curl http://localhost:8080
-```
-
-**c) Com `curl` (Método não permitido):**
-
-Envie uma requisição `POST`. O servidor deve responder com `405 Method Not Allowed`. O `-v` mostra os detalhes da resposta.
-```bash
-curl -X POST -v http://localhost:8080
-```
-
-## Arquitetura e Ciclo de Vida da Requisição
-
-Esta seção detalha a jornada completa de uma requisição HTTP, desde o navegador até a resposta do servidor.
-
-### 1. Inicialização do Servidor
-
-- Você executa `./webserv .config` no terminal.
-- O `main` cria uma instância do `ConfigParser`, que lê e valida o `.config`.
-- Em seguida, o `main` cria uma instância do `Server`, passando as configurações lidas.
-- O construtor do `Server` chama `socket()`, `bind()` e `listen()`. Isso instrui o Sistema Operacional (SO) a começar a escutar por conexões na porta especificada (ex: 8080).
-- **Ponto Chave**: Se o servidor não estiver rodando, o SO recusará ativamente qualquer tentativa de conexão a essa porta, resultando no erro `Connection refused`.
-
-### 2. A Chegada da Conexão
-
-- Um cliente (navegador ou `curl`) tenta se conectar a `localhost:8080`.
-- O SO, que estava escutando, vê essa tentativa e notifica o processo `webserv`.
-- Dentro do `Server::run()`, a chamada `select()` desbloqueia e reporta que o socket principal de escuta tem atividade.
-- O método `_acceptNewConnection` é chamado. Ele usa `accept()` para criar um **novo socket** dedicado exclusivamente a este cliente.
-- Uma instância de `ClientConnection` é criada para gerenciar este novo socket e o estado do cliente.
-
-### 3. Recebendo e Validando a Requisição
-
-- O cliente envia a requisição HTTP como texto (ex: `GET /style.css HTTP/1.1...`).
-- O `select()` novamente desperta, desta vez reportando atividade no socket do cliente.
-- `_handleClientData` é chamado. O método `client->readRequest()` lê os dados do socket e os acumula em um buffer interno.
-- O `readRequest` verifica continuamente se o buffer contém o marcador de fim de cabeçalhos (`\r\n\r\n`). Enquanto não o encontra, o servidor simplesmente aguarda por mais dados.
-- Quando a requisição está completa, uma instância de `HttpRequest` é criada para interpretar o buffer.
-- A primeira verificação é feita: `if (req.getMethod() != "GET")`. Se o método não for `GET`, uma resposta `405 Method Not Allowed` é preparada e o processo pula para o passo 5.
-
-### 4. Montando a Resposta (Lógica GET)
-
-- O servidor determina o caminho do arquivo solicitado. Ele combina a diretiva `root` do `.config` (ex: `./www`) com o URI da requisição (ex: `/style.css`) para formar o caminho completo: `./www/style.css`.
-- O servidor tenta abrir o arquivo. 
-- **Caso de Sucesso**: Se o arquivo for encontrado, uma instância de `HttpResponse` é preenchida com:
-    - Status: `200 OK`.
-    - Headers: `Content-Type` (determinado pela função `getMimeType`) e `Content-Length` (o tamanho do arquivo).
-    - Corpo: O conteúdo do arquivo lido.
-- **Caso de Falha**: Se o arquivo não for encontrado, a `HttpResponse` é preenchida com:
-    - Status: `404 Not Found`.
-    - Corpo: Um HTML simples de erro.
-
-### 5. Envio e Finalização
-
-- O método `res.toString()` é chamado para montar a string de texto completa da resposta HTTP (status, headers e corpo).
-- `send()` envia essa string de volta para o cliente através do socket da conexão.
-- `close()` é chamado no socket do cliente, encerrando a conexão.
-- O objeto `ClientConnection` é destruído, liberando a memória.
-- O servidor volta ao seu loop com `select()`, pronto para a próxima conexão.
-
-## Próximos Passos
-
-
-
-- [ ] **Parsing de Configuração Avançado**: Melhorar o parser para suportar todas as diretivas obrigatórias do PDF, como:
-
-    - Múltiplas portas (`listen`).
-
-    - Limite de tamanho do corpo da requisição (`client_max_body_size`).
-
-    - Páginas de erro customizadas.
-
-    - Regras por `location` (métodos aceitos, redirecionamento, etc.).
-
-- [ ] **Suporte a `Transfer-Encoding: chunked`**: Implementar a lógica para "desagrupar" requisições enviadas em partes.
-
-- [ ] **Robustez Geral**: Continuar testando e melhorando o tratamento de erros para todos os cenários inesperados, garantindo que o servidor nunca trave.
