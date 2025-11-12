@@ -1,11 +1,13 @@
-#!/usr/bin/python
+#!/usr/bin/python3
 
+import sys
 import os
 
-# Corpo da resposta HTML
+# Get REQUEST_METHOD from environment
 request_method = os.environ.get("REQUEST_METHOD", "(Not set)")
-html_body = f"""
-<!DOCTYPE html>
+
+# Create HTML body
+html_body = """<!DOCTYPE html>
 <html>
 <head>
     <title>CGI Hello</title>
@@ -19,15 +21,15 @@ html_body = f"""
     <h1>Hello from a Python CGI Script!</h1>
     <hr>
     <p>This page was generated dynamically by executing a Python script.</p>
-    <p>Your request method was: <strong>{request_method}</strong></p>
+    <p>Your request method was: <strong>{}</strong></p>
 </body>
-</html>
-"""
+</html>""".format(request_method)
 
-# Cabeçalhos HTTP (usando sintaxe Python 3)
-print("Content-Type: text/html")
-print(f"Content-Length: {len(html_body)}")
-print() # Linha em branco para separar cabeçalhos do corpo
+# Output HTTP headers with proper line endings
+sys.stdout.write("Content-Type: text/html\r\n")
+sys.stdout.write("Content-Length: {}\r\n".format(len(html_body)))
+sys.stdout.write("\r\n")
 
-# Corpo da resposta
-print(html_body)
+# Output body
+sys.stdout.write(html_body)
+sys.stdout.flush()
