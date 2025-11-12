@@ -633,11 +633,32 @@ void Server::_executeCgi(ClientConnection* client, const LocationConfig* loc) {
             script_name_uri = script_name_uri.substr(0, query_pos);
         }
 
+        std::string script_path = root + script_name_uri;
+
+        // This is a simple way to handle `./`
+        if (script_path.rfind("./", 0) == 0) {
+            script_path = script_path.substr(2);
+        }
+
         char cwd[1024];
         if (getcwd(cwd, sizeof(cwd)) == NULL) {
-            perror("getcwd failed"); exit(EXIT_FAILURE);
+            _sendErrorResponse(client, 500, "Internal Server Error: getcwd failed", loc);
+            return;
         }
-        std::string script_filename = std::string(cwd) + script_name_uri;
+
+        std::string script_filename = std::string(cwd) + "/" + script_path;
+        // Check if the script file exists and is executable
+        struct stat path_stat;
+        if (stat(script_filename.c_str(), &path_stat) != 0) {
+            perror("stat failed for CGI script");
+            _sendErrorResponse(client, 404, "Not Found", loc);
+            // We are in the parent, so we just return, no exit()
+            return;
+        }
+        if (!(path_stat.st_mode & S_IXUSR)) {
+            _sendErrorResponse(client, 403, "Forbidden", loc);
+            return;
+        }
 
         char** argv_c = new char*[3];
         argv_c[0] = new char[loc->cgi_path.length() + 1];
