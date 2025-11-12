@@ -478,15 +478,23 @@ void Server::_handleClientData(int client_fd) {
                     }
                 }
                 
-                                std::string filePath = root + uri;
-                                std::ifstream file(filePath.c_str());
-                bool file_found = file.is_open();
+                std::string filePath = root + uri;
+                
+                // Check if it's a directory first, before trying to open as file
+                struct stat path_stat_initial;
+                bool is_directory = (stat(filePath.c_str(), &path_stat_initial) == 0 && S_ISDIR(path_stat_initial.st_mode));
+                
+                std::ifstream file(filePath.c_str());
+                bool file_found = file.is_open() && !is_directory;
 
                 if (!file_found) {
                     // If not found, and URI doesn't have an extension, try appending .html
+                    // BUT: Don't append .html if the URI ends with /, as that's explicitly a directory request
                     size_t dot_pos = uri.rfind('.');
+                    size_t last_slash = uri.rfind('/');
                     // Check if there's no dot, or if the dot is part of a directory name (e.g., /path.to/file)
-                    if (dot_pos == std::string::npos || dot_pos < uri.rfind('/')) {
+                    // AND the URI doesn't end with /
+                    if ((dot_pos == std::string::npos || dot_pos < last_slash) && last_slash != uri.length() - 1) {
                         std::string html_filePath = filePath + ".html";
                         std::ifstream html_file(html_filePath.c_str());
                         if (html_file.is_open()) {
@@ -550,7 +558,41 @@ void Server::_handleClientData(int client_fd) {
                                     while ((ent = readdir(dir)) != NULL) {
                                         std::string name = ent->d_name;
                                         if (name == ".") continue;
-                                        body_ss << "<li><a href=\"" << uri << (name == ".." ? "" : name) << (name == ".." ? "" : (ent->d_type == DT_DIR ? "/" : "")) << "\">" << name << (ent->d_type == DT_DIR ? "/" : "") << "</a></li>";
+                                        
+                                        // Generate the href for this entry
+                                        std::string href;
+                                        if (name == "..") {
+                                            // For parent directory, go up one level
+                                            if (uri.length() > 1) {
+                                                // Remove trailing slash if present
+                                                std::string parent_uri = uri;
+                                                if (parent_uri[parent_uri.length() - 1] == '/') {
+                                                    parent_uri.erase(parent_uri.length() - 1);
+                                                }
+                                                // Find last slash and remove everything after it
+                                                size_t last_slash = parent_uri.rfind('/');
+                                                if (last_slash != std::string::npos) {
+                                                    parent_uri = parent_uri.substr(0, last_slash + 1);
+                                                } else {
+                                                    parent_uri = "/";
+                                                }
+                                                href = parent_uri;
+                                            } else {
+                                                href = "/";
+                                            }
+                                        } else {
+                                            // For regular files/directories, append to current URI
+                                            href = uri + name;
+                                            if (ent->d_type == DT_DIR) {
+                                                href += "/";
+                                            }
+                                        }
+                                        
+                                        body_ss << "<li><a href=\"" << href << "\">" << name;
+                                        if (ent->d_type == DT_DIR) {
+                                            body_ss << "/";
+                                        }
+                                        body_ss << "</a></li>";
                                     }
                                     closedir(dir);
                                 }
@@ -562,6 +604,7 @@ void Server::_handleClientData(int client_fd) {
                                 std::stringstream ss_len; ss_len << body.length();
                                 res.addHeader("Content-Length", ss_len.str());
                                 res.setBody(body);
+                                client->setResponse(res.toString());
                             } else {
                                 // No index and autoindex is off
                                 _sendErrorResponse(client, 403, "Forbidden", matched_location);
