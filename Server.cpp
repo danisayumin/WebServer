@@ -633,31 +633,36 @@ void Server::_executeCgi(ClientConnection* client, const LocationConfig* loc) {
             script_name_uri = script_name_uri.substr(0, query_pos);
         }
 
-        std::string script_path = root + script_name_uri;
+        // Convert relative root to absolute path
+        char abs_root[1024];
+        if (realpath(root.c_str(), abs_root) == NULL) {
+            perror("realpath failed for root");
+            exit(EXIT_FAILURE);
+        }
+        std::string absolute_root(abs_root);
 
-        // This is a simple way to handle `./`
-        if (script_path.rfind("./", 0) == 0) {
-            script_path = script_path.substr(2);
+        // Change to the location's root directory for CGI execution
+        if (chdir(absolute_root.c_str()) != 0) {
+            perror("chdir failed for CGI script");
+            exit(EXIT_FAILURE);
         }
 
         char cwd[1024];
         if (getcwd(cwd, sizeof(cwd)) == NULL) {
-            _sendErrorResponse(client, 500, "Internal Server Error: getcwd failed", loc);
-            return;
+            perror("getcwd failed after chdir");
+            exit(EXIT_FAILURE);
         }
 
-        std::string script_filename = std::string(cwd) + "/" + script_path;
+        std::string script_filename = std::string(cwd) + script_name_uri;
         // Check if the script file exists and is executable
         struct stat path_stat;
         if (stat(script_filename.c_str(), &path_stat) != 0) {
             perror("stat failed for CGI script");
-            _sendErrorResponse(client, 404, "Not Found", loc);
-            // We are in the parent, so we just return, no exit()
-            return;
+            exit(EXIT_FAILURE);
         }
         if (!(path_stat.st_mode & S_IXUSR)) {
-            _sendErrorResponse(client, 403, "Forbidden", loc);
-            return;
+            perror("CGI script is not executable");
+            exit(EXIT_FAILURE);
         }
 
         char** argv_c = new char*[3];
@@ -721,6 +726,7 @@ void Server::_executeCgi(ClientConnection* client, const LocationConfig* loc) {
         _pipe_to_client_map[cgi_stdout_pipe[0]] = client->getFd();
 
         FD_SET(cgi_stdout_pipe[0], &_master_set);
+        if (cgi_stdout_pipe[0] > _max_fd) _max_fd = cgi_stdout_pipe[0];
         close(cgi_stdin_pipe[0]);
 
         const HttpRequest& req = client->getRequest();
@@ -766,12 +772,9 @@ void Server::_handleCgiRead(int pipe_fd) {
         std::string current_response = client->getResponseBuffer();
         current_response.append(buffer);
         client->setResponse(current_response);
-        std::cerr << "_handleCgiRead: Read " << bytes_read << " bytes. Current output: " << current_response << std::endl; fflush(stderr);
     } else { // read <= 0 means EOF or error
-        std::cerr << "_handleCgiRead: EOF or error. bytes_read = " << bytes_read << std::endl; fflush(stderr);
         // CGI script has finished or error occurred
         std::string cgi_output = client->getResponseBuffer();
-        std::cerr << "_handleCgiRead: Full CGI output: \n---\n" << cgi_output << "\n---\n" << std::endl; fflush(stderr);
         
         // --- NEW ERROR DETECTION LOGIC FOR CHILD PROCESS ERRORS ---
         if (cgi_output.find("execve failed") != std::string::npos ||
@@ -779,7 +782,6 @@ void Server::_handleCgiRead(int pipe_fd) {
             cgi_output.find("Permission denied") != std::string::npos ||
             cgi_output.empty()) // If child produced no output, it might be an error
         {
-            std::cerr << "_handleCgiRead: Detected child process error in CGI output. Sending 500." << std::endl; fflush(stderr);
             _sendErrorResponse(client, 500, "Internal Server Error: CGI script execution failed", loc);
             // Cleanup CGI process
             waitpid(client->getCgiPid(), NULL, 0); // Wait for child process to finish
@@ -805,14 +807,11 @@ void Server::_handleCgiRead(int pipe_fd) {
         std::string final_body;
 
         if (header_end == std::string::npos) {
-            std::cerr << "_handleCgiRead: No CGI headers found." << std::endl; fflush(stderr);
             final_body = cgi_output;
         } else {
             std::string cgi_headers_str = cgi_output.substr(0, header_end);
             std::string cgi_body = cgi_output.substr(header_end + separator_len);
             final_body = cgi_body;
-            std::cerr << "_handleCgiRead: CGI Headers: \n" << cgi_headers_str << std::endl; fflush(stderr);
-            std::cerr << "_handleCgiRead: CGI Body: \n" << cgi_body << std::endl; fflush(stderr);
 
             std::stringstream ss_headers(cgi_headers_str);
             std::string line;
@@ -829,7 +828,6 @@ void Server::_handleCgiRead(int pipe_fd) {
                         value = value.substr(first_char);
                     }
                     res.addHeader(key, value);
-                    std::cerr << "_handleCgiRead: Added Header: " << key << ": " << value << std::endl; fflush(stderr);
                 }
             }
         }
@@ -837,7 +835,6 @@ void Server::_handleCgiRead(int pipe_fd) {
         std::stringstream ss_len;
         ss_len << final_body.length();
         res.addHeader("Content-Length", ss_len.str());
-        std::cerr << "_handleCgiRead: Final Body Length: " << final_body.length() << std::endl; fflush(stderr);
 
         client->setResponse(res.toString());
         FD_SET(client_fd, &_write_fds);

@@ -22,20 +22,66 @@ HttpRequestParser::~HttpRequestParser() {}
 HttpRequestParser::ParsingState HttpRequestParser::parse(std::string& data) {
     while (_state != PARSING_COMPLETE && _state != PARSING_ERROR) {
         if (_state == PARSING_REQUEST_LINE) {
+            // Find both \r\n and \n to handle different line endings
             size_t crlf_pos = data.find("\r\n");
-            if (crlf_pos == std::string::npos) {
+            size_t lf_pos = data.find("\n");
+            
+            size_t line_end = std::string::npos;
+            size_t line_ending_len = 0;
+            
+            // Determine which comes first
+            if (crlf_pos != std::string::npos && lf_pos != std::string::npos) {
+                if (crlf_pos < lf_pos) {
+                    line_end = crlf_pos;
+                    line_ending_len = 2;
+                } else {
+                    line_end = lf_pos;
+                    line_ending_len = 1;
+                }
+            } else if (crlf_pos != std::string::npos) {
+                line_end = crlf_pos;
+                line_ending_len = 2;
+            } else if (lf_pos != std::string::npos) {
+                line_end = lf_pos;
+                line_ending_len = 1;
+            }
+            
+            if (line_end == std::string::npos) {
                 break; // Not enough data for request line
             }
-            parseRequestLine(data.substr(0, crlf_pos));
-            data.erase(0, crlf_pos + 2);
+            parseRequestLine(data.substr(0, line_end));
+            data.erase(0, line_end + line_ending_len);
             _state = PARSING_HEADERS;
         } else if (_state == PARSING_HEADERS) {
+            // Find both \r\n and \n to handle different line endings
             size_t crlf_pos = data.find("\r\n");
-            if (crlf_pos == std::string::npos) {
+            size_t lf_pos = data.find("\n");
+            
+            size_t line_end = std::string::npos;
+            size_t line_ending_len = 0;
+            
+            // Determine which comes first
+            if (crlf_pos != std::string::npos && lf_pos != std::string::npos) {
+                if (crlf_pos < lf_pos) {
+                    line_end = crlf_pos;
+                    line_ending_len = 2;
+                } else {
+                    line_end = lf_pos;
+                    line_ending_len = 1;
+                }
+            } else if (crlf_pos != std::string::npos) {
+                line_end = crlf_pos;
+                line_ending_len = 2;
+            } else if (lf_pos != std::string::npos) {
+                line_end = lf_pos;
+                line_ending_len = 1;
+            }
+            
+            if (line_end == std::string::npos) {
                 break; // Not enough data for a header line
             }
-            std::string line = data.substr(0, crlf_pos);
-            data.erase(0, crlf_pos + 2);
+            std::string line = data.substr(0, line_end);
+            data.erase(0, line_end + line_ending_len);
 
             if (line.empty()) { // End of headers
                 std::string content_type = _request.getHeader("Content-Type");
@@ -139,11 +185,34 @@ void HttpRequestParser::parseBody(std::string& data) {
 void HttpRequestParser::parseChunkedBody(std::string& data) {
     while (_chunkState != CHUNK_COMPLETE && _state != PARSING_ERROR) {
         if (_chunkState == CHUNK_SIZE) {
+            // Find both \r\n and \n to handle different line endings
             size_t crlf_pos = data.find("\r\n");
-            if (crlf_pos == std::string::npos) {
+            size_t lf_pos = data.find("\n");
+            
+            size_t line_end = std::string::npos;
+            size_t line_ending_len = 0;
+            
+            // Determine which comes first
+            if (crlf_pos != std::string::npos && lf_pos != std::string::npos) {
+                if (crlf_pos < lf_pos) {
+                    line_end = crlf_pos;
+                    line_ending_len = 2;
+                } else {
+                    line_end = lf_pos;
+                    line_ending_len = 1;
+                }
+            } else if (crlf_pos != std::string::npos) {
+                line_end = crlf_pos;
+                line_ending_len = 2;
+            } else if (lf_pos != std::string::npos) {
+                line_end = lf_pos;
+                line_ending_len = 1;
+            }
+            
+            if (line_end == std::string::npos) {
                 break; // Not enough data for chunk size line
             }
-            std::string size_str = data.substr(0, crlf_pos);
+            std::string size_str = data.substr(0, line_end);
             
             // Error checking for strtol
             char *endptr;
@@ -153,7 +222,7 @@ void HttpRequestParser::parseChunkedBody(std::string& data) {
                 return;
             }
 
-            data.erase(0, crlf_pos + 2); // Consume chunk size line
+            data.erase(0, line_end + line_ending_len); // Consume chunk size line
 
             if (_currentChunkSize == 0) {
                 _chunkState = CHUNK_TRAILER_CRLF; // Expecting 0\r\n then optional trailers
@@ -175,23 +244,47 @@ void HttpRequestParser::parseChunkedBody(std::string& data) {
                 break; // Not enough chunk data yet
             }
         } else if (_chunkState == CHUNK_END_CRLF) {
-            if (data.length() < 2) {
-                break; // Not enough data for CRLF
+            // Accept both \r\n and \n as chunk terminator
+            if (data.length() >= 2 && data.substr(0, 2) == "\r\n") {
+                data.erase(0, 2); // Consume CRLF
+                _chunkState = CHUNK_SIZE; // Ready for next chunk size
+            } else if (data.length() >= 1 && data[0] == '\n') {
+                data.erase(0, 1); // Consume LF
+                _chunkState = CHUNK_SIZE; // Ready for next chunk size
+            } else {
+                break; // Not enough data for CRLF or malformed
             }
-            if (data.substr(0, 2) != "\r\n") {
-                _state = PARSING_ERROR; // Malformed chunk (missing CRLF)
-                return;
-            }
-            data.erase(0, 2); // Consume CRLF
-            _chunkState = CHUNK_SIZE; // Ready for next chunk size
         } else if (_chunkState == CHUNK_TRAILER_CRLF) {
             // After 0\r\n, we expect optional trailing headers followed by a final \r\n
+            // Find both \r\n and \n to handle different line endings
             size_t crlf_pos = data.find("\r\n");
-            if (crlf_pos == std::string::npos) {
+            size_t lf_pos = data.find("\n");
+            
+            size_t line_end = std::string::npos;
+            size_t line_ending_len = 0;
+            
+            // Determine which comes first
+            if (crlf_pos != std::string::npos && lf_pos != std::string::npos) {
+                if (crlf_pos < lf_pos) {
+                    line_end = crlf_pos;
+                    line_ending_len = 2;
+                } else {
+                    line_end = lf_pos;
+                    line_ending_len = 1;
+                }
+            } else if (crlf_pos != std::string::npos) {
+                line_end = crlf_pos;
+                line_ending_len = 2;
+            } else if (lf_pos != std::string::npos) {
+                line_end = lf_pos;
+                line_ending_len = 1;
+            }
+            
+            if (line_end == std::string::npos) {
                 break; // Not enough data for trailer line or final CRLF
             }
-            std::string line = data.substr(0, crlf_pos);
-            data.erase(0, crlf_pos + 2);
+            std::string line = data.substr(0, line_end);
+            data.erase(0, line_end + line_ending_len);
 
             if (line.empty()) { // Final \r\n, end of chunked body
                 _chunkState = CHUNK_COMPLETE;
@@ -230,13 +323,36 @@ void HttpRequestParser::parseMultipartBody(std::string& data) {
                 return;
             }
         } else if (_multipartState == MULTIPART_HEADERS) {
+            // Find both \r\n\r\n and \n\n to handle different line endings
             size_t crlf_pos = _multipartBuffer.find("\r\n\r\n");
-            if (crlf_pos == std::string::npos) {
+            size_t lf_pos = _multipartBuffer.find("\n\n");
+            
+            size_t header_end = std::string::npos;
+            size_t separator_len = 0;
+            
+            // Determine which comes first
+            if (crlf_pos != std::string::npos && lf_pos != std::string::npos) {
+                if (crlf_pos < lf_pos) {
+                    header_end = crlf_pos;
+                    separator_len = 4;
+                } else {
+                    header_end = lf_pos;
+                    separator_len = 2;
+                }
+            } else if (crlf_pos != std::string::npos) {
+                header_end = crlf_pos;
+                separator_len = 4;
+            } else if (lf_pos != std::string::npos) {
+                header_end = lf_pos;
+                separator_len = 2;
+            }
+            
+            if (header_end == std::string::npos) {
                 std::cerr << "DEBUG: Not enough data for multipart headers. Breaking." << std::endl; fflush(stderr);
                 break;
             }
-            std::string headers_str = _multipartBuffer.substr(0, crlf_pos);
-            _multipartBuffer.erase(0, crlf_pos + 4);
+            std::string headers_str = _multipartBuffer.substr(0, header_end);
+            _multipartBuffer.erase(0, header_end + separator_len);
 
             _currentPartHeaders = headers_str;
             std::cerr << "DEBUG: Parsed multipart headers: \n" << _currentPartHeaders << std::endl; fflush(stderr);
