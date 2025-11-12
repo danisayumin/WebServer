@@ -10,28 +10,16 @@ request_body = sys.stdin.read(content_length) if content_length > 0 else ""
 # Create HTML body
 html_body = """<!DOCTYPE html>
 <html>
-<head>
-    <title>CGI POST Test</title>
-    <style>
-        body {{ font-family: monospace; background-color: #222; color: #0f0; }}
-        h1, h2 {{ color: #0f0; }}
-        pre {{ background-color: #111; padding: 10px; border: 1px solid #0f0; }}
-    </style>
-</head>
 <body>
     <h1>CGI POST Request Received</h1>
     <h2>Environment Variables:</h2>
-    <pre>
 REQUEST_METHOD: {request_method}
 CONTENT_LENGTH: {content_length}
 CONTENT_TYPE: {content_type}
 SCRIPT_NAME: {script_name}
 QUERY_STRING: {query_string}
-    </pre>
     <h2>Request Body (from stdin):</h2>
-    <pre>
 {request_body}
-    </pre>
 </body>
 </html>"""
 
