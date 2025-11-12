@@ -96,6 +96,7 @@ void ConfigParser::parse() {
             else if (directive == "index") current_location->index = value;
             else if (directive == "cgi_path") current_location->cgi_path = value;
             else if (directive == "cgi_ext") current_location->cgi_ext = value;
+            else if (directive == "cgi_timeout") current_location->cgi_timeout = std::atoi(value.c_str());
             else if (directive == "client_max_body_size") current_location->client_max_body_size = _parseSize(value);
             else if (directive == "error_page") {
                 std::stringstream value_ss(trimmedLine);

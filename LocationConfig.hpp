@@ -16,8 +16,9 @@ struct LocationConfig {
     std::string redirect; // New member for HTTP redirection
     std::string upload_path; // New member for upload directory
     bool autoindex; // New member for directory listing
+    int cgi_timeout; // Timeout in seconds for CGI execution (default 10 seconds)
 
-    LocationConfig() : client_max_body_size(1 * 1024 * 1024), autoindex(false) {} // Default 1MB, autoindex off
+    LocationConfig() : client_max_body_size(1 * 1024 * 1024), autoindex(false), cgi_timeout(10) {} // Default 1MB, autoindex off, 10s timeout
 };
 
 #endif

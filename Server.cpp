@@ -18,6 +18,7 @@
 #include <signal.h>
 #include <dirent.h>
 #include <sys/stat.h>
+#include <ctime> // For time tracking
 
 std::string getMimeType(const std::string& filePath) {
     static std::map<std::string, std::string> mimeTypes;
@@ -115,6 +116,9 @@ void Server::run() {
             perror("select");
             continue;
         }
+
+        // Check for CGI timeouts
+        _checkCgiTimeouts();
 
         for (int fd = 0; fd <= _max_fd; ++fd) {
             if (FD_ISSET(fd, &read_fds)) {
@@ -725,6 +729,10 @@ void Server::_executeCgi(ClientConnection* client, const LocationConfig* loc) {
         client->setCgiPid(pid);
         _pipe_to_client_map[cgi_stdout_pipe[0]] = client->getFd();
 
+        // Track CGI start time and timeout
+        _cgi_start_times[client->getFd()] = time(NULL);
+        _cgi_timeouts[client->getFd()] = loc ? loc->cgi_timeout : 10; // Default 10 seconds
+
         FD_SET(cgi_stdout_pipe[0], &_master_set);
         if (cgi_stdout_pipe[0] > _max_fd) _max_fd = cgi_stdout_pipe[0];
         close(cgi_stdin_pipe[0]);
@@ -788,6 +796,8 @@ void Server::_handleCgiRead(int pipe_fd) {
             close(pipe_fd);
             FD_CLR(pipe_fd, &_master_set);
             _pipe_to_client_map.erase(pipe_fd);
+            _cgi_start_times.erase(client_fd);
+            _cgi_timeouts.erase(client_fd);
             client->setCgiPid(0);
             client->setCgiPipeFd(-1);
             return; // Important: return after sending error
@@ -844,6 +854,8 @@ void Server::_handleCgiRead(int pipe_fd) {
         close(pipe_fd);
         FD_CLR(pipe_fd, &_master_set);
         _pipe_to_client_map.erase(pipe_fd);
+        _cgi_start_times.erase(client_fd);
+        _cgi_timeouts.erase(client_fd);
         client->setCgiPid(0);
         client->setCgiPipeFd(-1);
     }
@@ -954,4 +966,85 @@ void Server::_sendErrorResponse(ClientConnection* client, int code, const std::s
 
     client->setResponse(res.toString());
     FD_SET(client->getFd(), &_write_fds);
+}
+
+void Server::_checkCgiTimeouts() {
+    time_t current_time = time(NULL);
+    
+    // Create a list of client FDs to check (avoid modifying map during iteration)
+    std::vector<int> client_fds_to_check;
+    for (std::map<int, time_t>::iterator it = _cgi_start_times.begin(); 
+         it != _cgi_start_times.end(); ++it) {
+        client_fds_to_check.push_back(it->first);
+    }
+    
+    // Check each CGI process for timeout
+    for (size_t i = 0; i < client_fds_to_check.size(); ++i) {
+        int client_fd = client_fds_to_check[i];
+        
+        // Check if client still exists
+        if (_clients.find(client_fd) == _clients.end()) {
+            _cgi_start_times.erase(client_fd);
+            _cgi_timeouts.erase(client_fd);
+            continue;
+        }
+        
+        ClientConnection* client = _clients[client_fd];
+        time_t start_time = _cgi_start_times[client_fd];
+        int timeout = _cgi_timeouts[client_fd];
+        time_t elapsed = current_time - start_time;
+        
+        // Check if timeout exceeded
+        if (elapsed > timeout) {
+            std::cerr << "CGI timeout exceeded for client " << client_fd 
+                      << " (elapsed: " << elapsed << "s, timeout: " << timeout << "s)" << std::endl;
+            fflush(stderr);
+            
+            // Get the pipe fd associated with this client
+            int pipe_fd = -1;
+            for (std::map<int, int>::iterator it = _pipe_to_client_map.begin(); 
+                 it != _pipe_to_client_map.end(); ++it) {
+                if (it->second == client_fd) {
+                    pipe_fd = it->first;
+                    break;
+                }
+            }
+            
+            // Kill the CGI process
+            pid_t cgi_pid = client->getCgiPid();
+            if (cgi_pid > 0) {
+                std::cout << "Killing CGI process with PID " << cgi_pid << " due to timeout" << std::endl;
+                kill(cgi_pid, SIGKILL);
+                waitpid(cgi_pid, NULL, WNOHANG); // Non-blocking wait
+            }
+            
+            // Send timeout error response
+            _sendErrorResponse(client, 504, "Gateway Timeout", client->getCgiLocation());
+            
+            // Cleanup
+            if (pipe_fd >= 0) {
+                close(pipe_fd);
+                FD_CLR(pipe_fd, &_master_set);
+                _pipe_to_client_map.erase(pipe_fd);
+            }
+            
+            // Cleanup CGI stdin pipe if exists
+            for (std::map<int, int>::iterator it = _cgi_stdin_pipe_to_client_map.begin(); 
+                 it != _cgi_stdin_pipe_to_client_map.end(); ) {
+                if (it->second == client_fd) {
+                    close(it->first);
+                    FD_CLR(it->first, &_write_fds);
+                    _cgi_stdin_pipe_to_client_map.erase(it++);
+                } else {
+                    ++it;
+                }
+            }
+            
+            // Clear timeout tracking
+            _cgi_start_times.erase(client_fd);
+            _cgi_timeouts.erase(client_fd);
+            client->setCgiPid(0);
+            client->setCgiPipeFd(-1);
+        }
+    }
 }

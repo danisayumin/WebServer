@@ -33,5 +33,15 @@ fclean: clean
 # Regra para recompilar
 re: fclean all
 
+# Inicia a sessão telnet e espera comandos manuais
+telnet1:
+	@echo "Conectando ao localhost:8080. Digite sua requisição (ex: GET / HTTP/1.1) e pressione ENTER duas vezes."
+	telnet localhost 8080
+
+# Envia uma requisição HTTP não padrão ("GARBAGE") automaticamente
+telnet2:
+	@echo "Enviando requisição 'GARBAGE / HTTP/1.1' e esperando resposta..."
+	printf "GARBAGE / HTTP/1.1\r\nHost: localhost\r\n\r\n" | telnet localhost 8080
+
 # Declaração de que as regras não são arquivos
-.PHONY: all clean fclean re
+.PHONY: all clean fclean re telnet1 telnet2
