@@ -191,7 +191,8 @@ void Server::_handleClientData(int client_fd) {
             max_body_size = matched_location->client_max_body_size;
         }
 
-        if (client->getRequestBufferSize() > max_body_size) {
+        // Check the TOTAL request size (headers + body), not just body
+        if (client->getTotalRequestSize() > max_body_size) {
             _sendErrorResponse(client, 413, "Payload Too Large", matched_location);
             client->replaceParser();
             return;

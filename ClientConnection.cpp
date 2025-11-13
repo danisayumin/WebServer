@@ -43,6 +43,7 @@ ssize_t ClientConnection::readRequest() {
     }
 
     std::string data_chunk(buffer, bytes_read);
+    _requestBuffer.append(data_chunk); // Append to total request buffer
     _parser->parse(data_chunk); // Feed data to the parser
 
     return bytes_read;
@@ -62,6 +63,11 @@ size_t ClientConnection::getRequestBufferSize() const {
         return _parser->getRequest().getBody().length();
     }
     return 0; // Or throw an error, depending on desired behavior
+}
+
+size_t ClientConnection::getTotalRequestSize() const {
+    // Return the total size of the request buffer received (headers + body)
+    return _requestBuffer.length();
 }
 
 bool ClientConnection::isRequestComplete() const {

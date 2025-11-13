@@ -18,6 +18,7 @@ public:
     bool isRequestComplete() const;
     const HttpRequest& getRequest() const;
     size_t getRequestBufferSize() const; // Re-add this declaration
+    size_t getTotalRequestSize() const; // Total size including headers
     void replaceParser();
     void setResponse(const std::string& response);
     const std::string& getResponseBuffer() const;
